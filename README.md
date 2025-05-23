@@ -1,1 +1,1 @@
-# S-P500-Prediction-Model
+# S&P500-Prediction-Model
