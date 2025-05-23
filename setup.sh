@@ -3,6 +3,31 @@
 # Exit on error
 set -e
 
+# Default settings
+SKIP_REACT=false
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --skip-react)
+      SKIP_REACT=true
+      shift
+      ;;
+    -h|--help)
+      echo "Usage: ./setup.sh [OPTIONS]"
+      echo "Options:"
+      echo "  --skip-react       Skip React/npm installation"
+      echo "  -h, --help         Show this help message"
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1"
+      echo "Use --help to see available options"
+      exit 1
+      ;;
+  esac
+done
+
 echo "Setting up Flask-React application with News API..."
 
 # Create and activate Python virtual environment
@@ -21,26 +46,57 @@ mkdir -p static/js/dist
 mkdir -p static/css
 mkdir -p templates
 
-# Note about React setup
-echo ""
-echo "React frontend setup instructions (to be run when needed):"
-echo "1. Install Node.js dependencies:"
-echo "   npm init -y"
-echo "   npm install react react-dom"
-echo "   npm install --save-dev @babel/core @babel/preset-env @babel/preset-react babel-loader webpack webpack-cli"
-echo ""
-echo "2. Build the React frontend:"
-echo "   npm run build"
-echo ""
+# Set up React frontend
+if [ "$SKIP_REACT" = false ]; then
+  echo ""
+  echo "===== SETTING UP REACT FRONTEND ====="
+  
+  if command -v npm &> /dev/null; then
+    echo "Installing Node.js dependencies..."
+    npm install
+    
+    echo "Building React frontend..."
+    npm run build
+  else
+    echo "Node.js/npm not found. Skipping React setup."
+    echo "Please install Node.js and npm, then run 'npm install' and 'npm run build'."
+    
+    # Create placeholder bundle.js if it doesn't exist
+    if [ ! -f static/js/dist/bundle.js ]; then
+      echo "Creating placeholder bundle.js..."
+      echo "// Placeholder bundle.js
+// Run 'npm install' and 'npm run build' to generate the actual bundle
+console.log('React not yet built. Please run npm install and npm run build to set up the React frontend.');" > static/js/dist/bundle.js
+    fi
+  fi
+else
+  echo ""
+  echo "Skipping React setup (--skip-react flag used)"
+  
+  # Create placeholder bundle.js if it doesn't exist
+  if [ ! -f static/js/dist/bundle.js ]; then
+    echo "Creating placeholder bundle.js..."
+    echo "// Placeholder bundle.js
+// Run 'npm install' and 'npm run build' to generate the actual bundle
+console.log('React not yet built. Please run npm install and npm run build to set up the React frontend.');" > static/js/dist/bundle.js
+  fi
+fi
 
-echo "Setup complete! You can now run the application:"
-echo "1. Activate the virtual environment: source venv/bin/activate"
-echo "2. Start the Flask server with a custom port (to avoid AirPlay conflict):"
-echo "   python app.py --port=5001"
 echo ""
-echo "Once running, you can access:"
-echo "- News API at: http://127.0.0.1:5001/api/news"
-echo "- Frontend at: http://127.0.0.1:5001/ (after React setup)"
+echo "===== SETUP COMPLETE ====="
 echo ""
-echo "To test the News API, run the test script:"
-echo "   ./test_news_api.py 5001" 
+echo "The Flask application with News API is now set up."
+if [ "$SKIP_REACT" = true ]; then
+  echo "Note: React frontend setup was skipped. Run 'npm install' and 'npm run build' to set it up later."
+fi
+echo ""
+echo "To run the application:"
+echo "  ./start.sh"
+echo ""
+echo "Or manually:"
+echo "  source venv/bin/activate"
+echo "  python app.py --port=5001"
+echo ""
+echo "To access the application:"
+echo "- News API: http://127.0.0.1:5001/api/news"
+echo "- Frontend: http://127.0.0.1:5001/" 
