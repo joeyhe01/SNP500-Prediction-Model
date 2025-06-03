@@ -4,30 +4,33 @@ import requests
 import json
 import time
 import os
+import sys
 from datetime import datetime, timedelta
 
-def fetch_news_for_date(date, api_key, max_retries=5, retry_delay=5):
+# Add parent directory to path to allow imports when running directly
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from models.database import get_db_session, News
+from sqlalchemy.exc import IntegrityError
+
+def fetch_news_for_topic(topic, time_from, api_key, max_retries=5, retry_delay=5):
     """
-    Fetch news articles for a specific date
+    Fetch news articles for a specific topic
     
     Args:
-        date: Date object to fetch news for
+        topic: Topic to fetch news for (earnings, financial_markets, finance, technology)
+        time_from: Start time in YYYYMMDDTHHMM format
         api_key: Alpha Vantage API key
         max_retries: Maximum number of retry attempts
         retry_delay: Delay between retries in seconds
     
     Returns:
-        List of simplified news items
+        List of news items
     """
-    # Format start date (current day at 00:00)
-    time_from = date.strftime("%Y%m%dT0000")
+    print(f"Fetching {topic} news from {time_from} ...")
     
-    # Format end date (next day at 00:00)
-    
-    print(f"Fetching news from {time_from} ...")
-    
-    # Construct URL with proper parameters for NEWS_SENTIMENT endpoint
-    url = f'https://www.alphavantage.co/query?function=NEWS_SENTIMENT&time_from={time_from}&sort=EARLIEST&apikey={api_key}'
+    # Construct URL with topic parameter
+    url = f'https://www.alphavantage.co/query?function=NEWS_SENTIMENT&topics={topic}&time_from={time_from}&limit=50&sort=EARLIEST&apikey={api_key}'
     
     retry_count = 0
     while retry_count <= max_retries:
@@ -47,26 +50,10 @@ def fetch_news_for_date(date, api_key, max_retries=5, retry_delay=5):
                     time.sleep(wait_time)
                     continue
                 else:
-                    # If it's not a rate limit error but a "No articles" response, return empty list
                     return []
             
-            # Extract the required fields from each news item
-            simplified_news = []
-            for item in data['feed']:
-                # Get the time published and convert to datetime for filtering
-                time_published = item.get('time_published', '')
-                if time_published:
-                    news_item = {
-                        'title': item.get('title', ''),
-                        'summary': item.get('summary', ''),
-                        'source': item.get('source', ''),
-                        'time_published': time_published,
-                        'date': time_published[:8]  # Add date field (YYYYMMDD) for easier filtering later
-                    }
-                    simplified_news.append(news_item)
-            
-            print(f"  Found {len(simplified_news)} articles for {date.strftime('%Y-%m-%d')}")
-            return simplified_news
+            print(f"  Found {len(data.get('feed', []))} {topic} articles")
+            return data.get('feed', [])
         
         except Exception as e:
             print(f"Error fetching data: {e}")
@@ -80,83 +67,117 @@ def fetch_news_for_date(date, api_key, max_retries=5, retry_delay=5):
                 print(f"  Max retries reached. Moving on...")
                 return []
 
-    return []  # Return empty list if all retries fail
+    return []
 
-def process_single_day(date, api_key, output_file):
+def save_news_to_db(news_items, session):
     """
-    Process a single day
+    Save news items to database
     
     Args:
-        date: Date to process (datetime object)
-        api_key: Alpha Vantage API key
-        output_file: Path to output JSON file
+        news_items: List of news items to save
+        session: Database session
     
     Returns:
-        Number of articles fetched
+        Number of successfully saved items
     """
-    # Fetch news for this date
-    news_items = fetch_news_for_date(date, api_key)
+    saved_count = 0
     
-    # Load existing data if file exists
-    existing_news = []
-    if os.path.exists(output_file):
+    for item in news_items:
         try:
-            with open(output_file, 'r') as f:
-                existing_news = json.load(f)
-            print(f"Loaded {len(existing_news)} existing articles from {output_file}")
+            # Parse time_published
+            time_str = item.get('time_published', '')
+            if time_str:
+                # Format: YYYYMMDDTHHMMSS
+                time_published = datetime.strptime(time_str, '%Y%m%dT%H%M%S')
+                
+                news = News(
+                    title=item.get('title', ''),
+                    summary=item.get('summary', ''),
+                    source=item.get('source', ''),
+                    url=item.get('url', ''),
+                    time_published=time_published
+                )
+                
+                session.add(news)
+                session.commit()
+                saved_count += 1
+                
+        except IntegrityError:
+            # URL already exists, skip
+            session.rollback()
+            continue
         except Exception as e:
-            print(f"Error loading existing data: {e}")
+            print(f"Error saving news item: {e}")
+            session.rollback()
+            continue
     
-    # Combine existing and new data
-    all_news = existing_news + news_items
-    
-    # Save all news items to the JSON file
-    os.makedirs(os.path.dirname(output_file), exist_ok=True)  # Create directory if it doesn't exist
-    with open(output_file, 'w') as f:
-        json.dump(all_news, f, indent=2)
-    
-    print(f"Saved {len(all_news)} total articles to {output_file} ({len(news_items)} new articles for {date.strftime('%Y-%m-%d')})")
-    
-    # Sleep to respect API rate limits
-    time.sleep(1)  # Wait 1 second between API calls
-    
-    return len(news_items)
+    return saved_count
 
-def main():
-    # Set a fixed output filename
-    output_filename = "data/alpha_vantage_news_2023.json"
+def fetch_news_for_date_range(start_date, end_date, api_key):
+    """
+    Fetch news for a date range from multiple topics
     
-    # Create output directory if it doesn't exist
-    os.makedirs(os.path.dirname(output_filename), exist_ok=True)
+    Args:
+        start_date: Start date (datetime object)
+        end_date: End date (datetime object)
+        api_key: Alpha Vantage API key
     
-    # Create empty file if it doesn't exist
-    if not os.path.exists(output_filename):
-        with open(output_filename, 'w') as f:
-            json.dump([], f)
+    Returns:
+        Total number of articles saved
+    """
+    session = get_db_session()
+    topics = ['earnings', 'financial_markets', 'finance', 'technology']
+    total_saved = 0
     
-    # Set start date and end date
-    start_date = datetime(2023, 3, 1)
-    end_date = datetime(2024, 3, 1)
-    
-    # Process each day individually
     current_date = start_date
-    total_articles = 0
-    
     while current_date <= end_date:
+        # Format time_from for API (YYYYMMDDTHHMM)
+        time_from = current_date.strftime("%Y%m%dT0000")
+        
         print(f"\nProcessing date: {current_date.strftime('%Y-%m-%d')}")
-        num_articles = process_single_day(current_date, alpha_vantage_api_key, output_filename)
-        total_articles += num_articles
+        
+        for topic in topics:
+            # Fetch news for this topic
+            news_items = fetch_news_for_topic(topic, time_from, api_key)
+            
+            # Save to database
+            if news_items:
+                saved_count = save_news_to_db(news_items, session)
+                total_saved += saved_count
+                print(f"  Saved {saved_count} {topic} articles to database")
+            
+            # Rate limit: wait between API calls
+            time.sleep(1)
         
         # Move to next day
         current_date += timedelta(days=1)
-        
-        print(f"Total articles collected so far: {total_articles}")
     
-    print("\n===================================================================")
-    print(f"Process complete: Processed all days from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
-    print(f"Total articles collected: {total_articles}")
-    print(f"All data saved to: {output_filename}")
-    print("===================================================================\n")
+    session.close()
+    return total_saved
+
+def main():
+    """
+    Main function to fetch news for the simulation period
+    """
+    # Set date range
+    start_date = datetime(2022, 3, 1)
+    end_date = datetime(2024, 3, 1)
+    
+    print(f"Fetching news from {start_date} to {end_date}")
+    print("Topics: earnings, financial_markets, finance, technology")
+    print("=" * 60)
+    
+    # Initialize database
+    from models.database import init_database
+    init_database()
+    
+    # Fetch and save news
+    total_saved = fetch_news_for_date_range(start_date, end_date, alpha_vantage_api_key)
+    
+    print("\n" + "=" * 60)
+    print(f"Process complete!")
+    print(f"Total articles saved to database: {total_saved}")
+    print("=" * 60)
 
 if __name__ == "__main__":
     main()

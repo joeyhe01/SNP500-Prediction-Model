@@ -37,4 +37,7 @@ static/js/dist/bundle.js.LICENSE.txt
 
 # Logs
 logs/
-*.log 
+*.log
+
+# Simulation results
+results/ 
