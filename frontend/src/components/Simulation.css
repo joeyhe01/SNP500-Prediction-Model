@@ -1,0 +1,189 @@
+.summary-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.summary-card {
+  background: white;
+  padding: 1.5rem;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  text-align: center;
+}
+
+.summary-label {
+  font-size: 0.875rem;
+  color: #64748b;
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.summary-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.summary-value.positive {
+  color: #059669;
+}
+
+.summary-value.negative {
+  color: #dc2626;
+}
+
+.summary-value.neutral {
+  color: #64748b;
+}
+
+.daily-data {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+
+.daily-data-header {
+  background: #f8fafc;
+  padding: 1.5rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.daily-data-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.day-row {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid #e2e8f0;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: grid;
+  grid-template-columns: 140px 120px 120px 120px 100px 100px 1fr;
+  gap: 1rem;
+  align-items: center;
+}
+
+.day-row:hover {
+  background: #f8fafc;
+}
+
+.day-row:last-child {
+  border-bottom: none;
+}
+
+.day-date {
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.day-value {
+  font-size: 0.875rem;
+}
+
+.day-value.positive {
+  color: #059669;
+}
+
+.day-value.negative {
+  color: #dc2626;
+}
+
+.day-value.neutral {
+  color: #64748b;
+}
+
+.positions-summary {
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.day-header {
+  background: #f1f5f9;
+  font-weight: 600;
+  color: #475569;
+  cursor: default;
+}
+
+.day-header:hover {
+  background: #f1f5f9;
+}
+
+.daily-data-list {
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .summary-cards {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 0.75rem;
+  }
+  
+  .summary-card {
+    padding: 1rem;
+  }
+  
+  .summary-value {
+    font-size: 1.25rem;
+  }
+  
+  .day-row {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+    padding: 1rem;
+  }
+  
+  .day-row > div {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.25rem 0;
+  }
+  
+  .day-row > div::before {
+    content: attr(data-label);
+    font-weight: 600;
+    color: #64748b;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  
+  .day-date::before {
+    content: "Date";
+  }
+  
+  .day-value:nth-child(2)::before {
+    content: "Starting $";
+  }
+  
+  .day-value:nth-child(3)::before {
+    content: "Ending $";
+  }
+  
+  .day-value:nth-child(4)::before {
+    content: "Daily P&L";
+  }
+  
+  .day-value:nth-child(5)::before {
+    content: "Return %";
+  }
+  
+  .day-value:nth-child(6)::before {
+    content: "Trades";
+  }
+  
+  .positions-summary::before {
+    content: "Positions";
+  }
+  
+  .day-header {
+    display: none;
+  }
+} 

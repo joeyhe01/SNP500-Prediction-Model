@@ -1,7 +1,10 @@
-import pandas as pd
 from datetime import datetime, timedelta
-from data_fetchers.stock_price_fetcher import StockPriceFetcher
 from models.base_sentiment_model import BaseSentimentModel
+from models.database import get_db_session, Simulation, DailyRecap, NewsSentiment
+from data_fetchers.stock_price_fetcher import StockPriceFetcher
+from sqlalchemy import and_
+from sqlalchemy.orm.attributes import flag_modified
+import pandas as pd
 import json
 import os
 
@@ -20,6 +23,8 @@ class StockSimulation:
         else:
             self.model = model_class()
         self.price_fetcher = StockPriceFetcher()
+        self.db_session = get_db_session()
+        self.simulation_id = None  # Will be set when simulation starts
         self.portfolio_value = 100000  # Starting with $100k
         self.position_size = position_size  # Fixed position size
         self.positions = {'long': {}, 'short': {}}
@@ -27,6 +32,55 @@ class StockSimulation:
         self.daily_returns = []
         self.daily_positions = []  # Track daily long/short positions
         self.daily_detailed_results = []  # NEW: Track detailed daily results with individual stock performance
+        
+    def create_simulation_record(self):
+        """
+        Create a new simulation record in the database
+        
+        Returns:
+            int: The simulation ID
+        """
+        try:
+            simulation = Simulation(
+                executed_at=datetime.utcnow(),
+                extra_data={}  # Will be populated with results later
+            )
+            self.db_session.add(simulation)
+            self.db_session.commit()
+            self.simulation_id = simulation.id
+            print(f"Created simulation record with ID: {self.simulation_id}")
+            return self.simulation_id
+        except Exception as e:
+            print(f"Error creating simulation record: {e}")
+            self.db_session.rollback()
+            raise
+    
+    def update_simulation_results(self, metrics):
+        """
+        Update the simulation record with final results
+        
+        Args:
+            metrics: Dictionary containing simulation metrics
+        """
+        try:
+            simulation = self.db_session.query(Simulation).filter(
+                Simulation.id == self.simulation_id
+            ).first()
+            
+            if simulation:
+                simulation.extra_data = {
+                    'metrics': metrics,
+                    'completed_at': datetime.utcnow().isoformat(),
+                    'total_trades': len(self.trade_history),
+                    'trading_days': len(self.daily_returns)
+                }
+                self.db_session.commit()
+                print(f"Updated simulation {self.simulation_id} with final results")
+            else:
+                print(f"Warning: Could not find simulation record {self.simulation_id}")
+        except Exception as e:
+            print(f"Error updating simulation results: {e}")
+            self.db_session.rollback()
         
     def get_trading_days(self, start_date, end_date):
         """
@@ -43,16 +97,56 @@ class StockSimulation:
             
         return trading_days
     
+    def store_daily_recap(self, date, starting_money, ending_money, positions_extra_data):
+        """
+        Store daily trading recap in the database
+        
+        Args:
+            date: Trading date
+            starting_money: Portfolio value at start of day
+            ending_money: Portfolio value at end of day
+            positions_extra_data: Dict containing shorts, longs, and returns for each position
+        """
+        try:
+            # Check if we already have a recap for this date and simulation
+            existing = self.db_session.query(DailyRecap).filter(
+                and_(
+                    DailyRecap.simulation_id == self.simulation_id,
+                    DailyRecap.date == date
+                )
+            ).first()
+            
+            if existing:
+                # Update existing record
+                existing.starting_money = starting_money
+                existing.ending_money = ending_money
+                existing.extra_data = positions_extra_data
+            else:
+                # Create new record
+                daily_recap = DailyRecap(
+                    simulation_id=self.simulation_id,
+                    date=date,
+                    starting_money=starting_money,
+                    ending_money=ending_money,
+                    extra_data=positions_extra_data
+                )
+                self.db_session.add(daily_recap)
+            
+            self.db_session.commit()
+        except Exception as e:
+            print(f"Error storing daily recap: {e}")
+            self.db_session.rollback()
+    
     def execute_trades(self, date, signals):
         """
-        Execute trades based on signals
+        Execute trades based on signals - OPEN positions at market open
         
         Args:
             date: Trading date
             signals: Dict with 'long' and 'short' ticker lists
         """
-        # Close existing positions and get detailed results
-        daily_details = self.close_all_positions_with_details(date)
+        starting_portfolio_value = self.portfolio_value
+        daily_trades = []  # Track trades for this specific day
         
         # Record daily positions
         if signals['long'] or signals['short']:
@@ -65,11 +159,21 @@ class StockSimulation:
         # Calculate position size (fixed at $10,000 per position)
         total_positions = len(signals['long']) + len(signals['short'])
         if total_positions == 0:
+            # Still store daily recap even if no trades
+            self.store_daily_recap(date, starting_portfolio_value, self.portfolio_value, {
+                'longs': [],
+                'shorts': [],
+                'positions': [],
+                'trades': daily_trades,
+                'daily_pnl': 0,
+                'return_pct': 0
+            })
             return
         
         position_size = self.position_size  # Fixed position size
+        new_positions = []
         
-        # Open long positions
+        # Open long positions at market open
         for ticker in signals['long']:
             price_data = self.price_fetcher.get_stock_price(ticker, date)
             if price_data and price_data['open'] > 0:
@@ -80,6 +184,16 @@ class StockSimulation:
                     'entry_date': date
                 }
                 
+                trade = {
+                    'date': date.strftime('%Y-%m-%d'),
+                    'ticker': ticker,
+                    'action': 'buy',
+                    'shares': round(shares, 2),
+                    'price': price_data['open'],
+                    'total_value': round(position_size, 2),
+                    'time': 'market_open'
+                }
+                
                 self.trade_history.append({
                     'date': date,
                     'ticker': ticker,
@@ -88,8 +202,18 @@ class StockSimulation:
                     'price': price_data['open'],
                     'value': position_size
                 })
+                
+                daily_trades.append(trade)
+                
+                new_positions.append({
+                    'ticker': ticker,
+                    'position_type': 'long',
+                    'shares': shares,
+                    'entry_price': price_data['open'],
+                    'position_value': position_size
+                })
         
-        # Open short positions
+        # Open short positions at market open
         for ticker in signals['short']:
             price_data = self.price_fetcher.get_stock_price(ticker, date)
             if price_data and price_data['open'] > 0:
@@ -100,6 +224,16 @@ class StockSimulation:
                     'entry_date': date
                 }
                 
+                trade = {
+                    'date': date.strftime('%Y-%m-%d'),
+                    'ticker': ticker,
+                    'action': 'sell',
+                    'shares': round(shares, 2),
+                    'price': price_data['open'],
+                    'total_value': round(position_size, 2),
+                    'time': 'market_open'
+                }
+                
                 self.trade_history.append({
                     'date': date,
                     'ticker': ticker,
@@ -108,23 +242,50 @@ class StockSimulation:
                     'price': price_data['open'],
                     'value': position_size
                 })
-    
-    def close_all_positions_with_details(self, date):
+                
+                daily_trades.append(trade)
+                
+                new_positions.append({
+                    'ticker': ticker,
+                    'position_type': 'short', 
+                    'shares': shares,
+                    'entry_price': price_data['open'],
+                    'position_value': position_size
+                })
+        
+        # Store opening trades only (P&L will be calculated at market close)
+        positions_extra_data = {
+            'longs': signals['long'],
+            'shorts': signals['short'], 
+            'positions': new_positions,
+            'trades': daily_trades,
+            'daily_pnl': 0,  # Will be updated at market close
+            'return_pct': 0  # Will be updated at market close
+        }
+        
+        self.store_daily_recap(date, starting_portfolio_value, self.portfolio_value, positions_extra_data)
+
+    def close_positions_at_market_close(self, date):
         """
-        Close all open positions at market open and return detailed position information
+        Close all open positions at market close and calculate P&L
+        
+        Args:
+            date: Trading date
         
         Returns:
-            Dictionary with detailed position results for the day
+            Daily P&L from closing positions
         """
+        starting_portfolio_value = self.portfolio_value
         daily_pnl = 0
+        closing_trades = []
         position_details = []
         
-        # Close long positions
+        # Close long positions at market close
         for ticker, position in list(self.positions['long'].items()):
             price_data = self.price_fetcher.get_stock_price(ticker, date)
-            if price_data and price_data['open'] > 0:
+            if price_data and price_data['close'] > 0:
                 entry_price = position['entry_price']
-                exit_price = price_data['open']
+                exit_price = price_data['close']
                 shares = position['shares']
                 pnl = shares * (exit_price - entry_price)
                 return_pct = ((exit_price - entry_price) / entry_price) * 100
@@ -150,14 +311,27 @@ class StockSimulation:
                     'pnl': pnl
                 })
                 
+                # Add closing trade
+                closing_trade = {
+                    'date': date.strftime('%Y-%m-%d'),
+                    'ticker': ticker,
+                    'action': 'sell',
+                    'shares': round(shares, 2),
+                    'price': exit_price,
+                    'total_value': round(shares * exit_price, 2),
+                    'time': 'market_close',
+                    'pnl': round(pnl, 2)
+                }
+                closing_trades.append(closing_trade)
+                
                 del self.positions['long'][ticker]
         
-        # Close short positions
+        # Close short positions at market close
         for ticker, position in list(self.positions['short'].items()):
             price_data = self.price_fetcher.get_stock_price(ticker, date)
-            if price_data and price_data['open'] > 0:
+            if price_data and price_data['close'] > 0:
                 entry_price = position['entry_price']
-                exit_price = price_data['open']
+                exit_price = price_data['close']
                 shares = position['shares']
                 # For shorts, profit when price goes down
                 pnl = shares * (entry_price - exit_price)
@@ -184,10 +358,28 @@ class StockSimulation:
                     'pnl': pnl
                 })
                 
+                # Add closing trade
+                closing_trade = {
+                    'date': date.strftime('%Y-%m-%d'),
+                    'ticker': ticker,
+                    'action': 'buy',  # Covering a short is buying
+                    'shares': round(shares, 2),
+                    'price': exit_price,
+                    'total_value': round(shares * exit_price, 2),
+                    'time': 'market_close',
+                    'pnl': round(pnl, 2)
+                }
+                closing_trades.append(closing_trade)
+                
                 del self.positions['short'][ticker]
         
-        # Update portfolio value
+        # Update portfolio value with daily P&L
         self.portfolio_value += daily_pnl
+        
+        # Update daily recap with closing trades and P&L
+        if closing_trades or daily_pnl != 0:
+            self.update_daily_recap_with_close(date, starting_portfolio_value, self.portfolio_value, 
+                                              closing_trades, position_details, daily_pnl)
         
         # Store detailed daily results
         if position_details:
@@ -195,7 +387,7 @@ class StockSimulation:
                 'date': date,
                 'total_pnl': daily_pnl,
                 'portfolio_value': self.portfolio_value,
-                'return_pct': (daily_pnl / (self.portfolio_value - daily_pnl)) * 100,
+                'return_pct': (daily_pnl / starting_portfolio_value) * 100 if starting_portfolio_value > 0 else 0,
                 'positions': position_details
             }
             self.daily_detailed_results.append(daily_detail)
@@ -205,16 +397,51 @@ class StockSimulation:
                 'date': date,
                 'pnl': daily_pnl,
                 'portfolio_value': self.portfolio_value,
-                'return_pct': (daily_pnl / (self.portfolio_value - daily_pnl)) * 100
+                'return_pct': (daily_pnl / starting_portfolio_value) * 100 if starting_portfolio_value > 0 else 0
             })
         
-        return position_details
+        return daily_pnl
 
-    def close_all_positions(self, date):
+    def update_daily_recap_with_close(self, date, starting_money, ending_money, closing_trades, position_details, daily_pnl):
         """
-        Close all open positions at market open (legacy method for compatibility)
+        Update the daily recap with closing trade information and final P&L
         """
-        return self.close_all_positions_with_details(date)
+        try:
+            existing = self.db_session.query(DailyRecap).filter(
+                and_(
+                    DailyRecap.simulation_id == self.simulation_id,
+                    DailyRecap.date == date
+                )
+            ).first()
+            
+            if existing:
+                # Get existing data and append closing trades
+                extra_data = existing.extra_data or {}
+                existing_trades = extra_data.get('trades', [])
+                all_trades = existing_trades + closing_trades
+                
+                # Update with final data
+                extra_data.update({
+                    'trades': all_trades,
+                    'closing_trades': closing_trades,
+                    'positions': position_details,
+                    'daily_pnl': daily_pnl,
+                    'return_pct': ((ending_money - starting_money) / starting_money) * 100 if starting_money > 0 else 0
+                })
+                
+                existing.ending_money = ending_money
+                existing.extra_data = extra_data
+                
+                # CRITICAL: Flag the JSON field as modified so SQLAlchemy detects the change
+                flag_modified(existing, 'extra_data')
+                
+                self.db_session.commit()
+                
+        except Exception as e:
+            print(f"Error updating daily recap with close: {e}")
+            import traceback
+            traceback.print_exc()
+            self.db_session.rollback()
     
     def run_simulation(self, start_date, end_date):
         """
@@ -224,7 +451,10 @@ class StockSimulation:
             start_date: Start date (datetime.date)
             end_date: End date (datetime.date)
         """
-        print(f"Running simulation from {start_date} to {end_date}")
+        # Create simulation record
+        self.create_simulation_record()
+        
+        print(f"Running simulation {self.simulation_id} from {start_date} to {end_date}")
         print(f"Starting portfolio value: ${self.portfolio_value:,.2f}")
         
         trading_days = self.get_trading_days(start_date, end_date)
@@ -233,25 +463,33 @@ class StockSimulation:
             # Skip first day (need previous day for signals)
             if i == 0:
                 continue
-                
-            # Get trading signals from the model
-            signals = self.model.get_trading_signals(date)
             
-            # Execute trades
+            # Get trading signals from the model for today
+            signals = self.model.get_trading_signals(date, self.simulation_id)
+            
+            # Step 1: Open new positions at market open based on signals
             if signals['long'] or signals['short']:
+                print(f"Opening positions for {date}: {len(signals['long'])} long, {len(signals['short'])} short")
                 self.execute_trades(date, signals)
+                
+                # Step 2: Close positions at market close of the same day
+                print(f"Closing positions at market close for {date}")
+                daily_pnl = self.close_positions_at_market_close(date)
+                print(f"Daily P&L: ${daily_pnl:,.2f}")
+            else:
+                print(f"No trading signals for {date}")
             
             # Progress update
             if i % 20 == 0:
                 print(f"Progress: {i}/{len(trading_days)} days, Portfolio: ${self.portfolio_value:,.2f}")
         
-        # Close any remaining positions
-        if trading_days:
-            self.close_all_positions(trading_days[-1])
-        
-        print(f"\nSimulation complete!")
+        print(f"\nSimulation {self.simulation_id} complete!")
         print(f"Final portfolio value: ${self.portfolio_value:,.2f}")
         print(f"Total return: {((self.portfolio_value - 100000) / 100000) * 100:.2f}%")
+        
+        # Update simulation record with final results
+        metrics = self.calculate_metrics()
+        self.update_simulation_results(metrics)
     
     def calculate_metrics(self):
         """
@@ -306,15 +544,18 @@ class StockSimulation:
     
     def save_results(self, filename):
         """
-        Save simulation results to file
+        Save simplified simulation results to file (most data is now in database)
         """
+        # Only save high-level summary metrics in JSON now
         results = {
-            'starting_portfolio_value': 100000,  # Starting capital
-            'metrics': self.calculate_metrics(),
-            'daily_returns': self.daily_returns,
-            'daily_positions': self.daily_positions,  # Include long/short positions
-            'daily_detailed_results': self.daily_detailed_results,  # NEW: Detailed daily results with individual stock performance
-            'trade_history': self.trade_history
+            'simulation_summary': {
+                'simulation_id': self.simulation_id,
+                'starting_portfolio_value': 100000,
+                'final_portfolio_value': self.portfolio_value,
+                'simulation_date': datetime.now().isoformat(),
+                'metrics': self.calculate_metrics()
+            },
+            'note': f'Detailed daily results and sentiment analysis are stored in database tables with simulation_id: {self.simulation_id}'
         }
         
         os.makedirs('results', exist_ok=True)
@@ -323,7 +564,10 @@ class StockSimulation:
         with open(filepath, 'w') as f:
             json.dump(results, f, indent=2, default=str)
         
-        print(f"Results saved to {filepath}")
+        print(f"Summary results saved to {filepath}")
+        print(f"Detailed results are stored in database tables for simulation {self.simulation_id}:")
+        print("  - news_sentiment: Individual headline sentiment analysis")
+        print("  - daily_recap: Daily trading results and portfolio performance")
     
     def compare_to_sp500(self, start_date, end_date):
         """
@@ -354,4 +598,11 @@ class StockSimulation:
         """Clean up resources"""
         if hasattr(self.model, 'close'):
             self.model.close()
-        self.price_fetcher.close() 
+        self.price_fetcher.close()
+        self.db_session.close()
+
+    def close_all_positions(self, date):
+        """
+        Legacy method for compatibility - closes positions at market close
+        """
+        return self.close_positions_at_market_close(date) 

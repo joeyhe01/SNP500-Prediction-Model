@@ -39,7 +39,7 @@ def run_yearly_simulation(year, model_class=BaseSentimentModel, debug=False):
     
     # Calculate and display metrics
     metrics = sim.calculate_metrics()
-    print(f"\n{year} Performance Metrics:")
+    print(f"\n{year} Performance Metrics (Simulation ID: {sim.simulation_id}):")
     print(f"  Total Return: {metrics['total_return_pct']:.2f}%")
     print(f"  Sharpe Ratio: {metrics['sharpe_ratio']:.2f}")
     print(f"  Max Drawdown: {metrics['max_drawdown_pct']:.2f}%")
@@ -49,8 +49,8 @@ def run_yearly_simulation(year, model_class=BaseSentimentModel, debug=False):
     # Compare to S&P 500
     sim.compare_to_sp500(start_date, end_date)
     
-    # Save results
-    filename = f"{model_class.__name__}_{year}_results.json"
+    # Save summary results (detailed data is in database)
+    filename = f"{model_class.__name__}_{year}_summary.json"
     sim.save_results(filename)
     
     # Cleanup
@@ -75,7 +75,7 @@ def run_combined_simulation(model_class=BaseSentimentModel, debug=False):
     
     # Calculate and display metrics
     metrics = sim.calculate_metrics()
-    print(f"\nCombined 2022-2023 Performance Metrics:")
+    print(f"\nCombined 2022-2023 Performance Metrics (Simulation ID: {sim.simulation_id}):")
     print(f"  Total Return: {metrics['total_return_pct']:.2f}%")
     print(f"  Sharpe Ratio: {metrics['sharpe_ratio']:.2f}")
     print(f"  Max Drawdown: {metrics['max_drawdown_pct']:.2f}%")
@@ -85,8 +85,8 @@ def run_combined_simulation(model_class=BaseSentimentModel, debug=False):
     # Compare to S&P 500
     sim.compare_to_sp500(start_date, end_date)
     
-    # Save results
-    filename = f"{model_class.__name__}_combined_2022_2023_results.json"
+    # Save summary results (detailed data is in database)
+    filename = f"{model_class.__name__}_combined_2022_2023_summary.json"
     sim.save_results(filename)
     
     # Cleanup
@@ -110,6 +110,7 @@ def main():
     # Initialize database
     print("Initializing database...")
     init_database()
+    print("Database tables created/updated: stock_prices, news, simulation, news_sentiment, daily_recap")
     
     # Get model class
     if args.model == 'BaseSentimentModel':
@@ -135,12 +136,24 @@ def main():
             print(f"\n{'='*60}")
             print("SIMULATION SUMMARY")
             print(f"{'='*60}")
-            print(f"2022 Total Return: {results_2022[1]['total_return_pct']:.2f}%")
-            print(f"2023 Total Return: {results_2023[1]['total_return_pct']:.2f}%")
+            print(f"2022 Total Return: {results_2022[1]['total_return_pct']:.2f}% (Simulation ID: {results_2022[0].simulation_id})")
+            print(f"2023 Total Return: {results_2023[1]['total_return_pct']:.2f}% (Simulation ID: {results_2023[0].simulation_id})")
             
             # Also run combined for comparison
             print("\nRunning combined simulation for comparison...")
             run_combined_simulation(model_class, debug=args.debug)
+            
+        print(f"\n{'='*60}")
+        print("DATA STORAGE INFORMATION")
+        print(f"{'='*60}")
+        print("Detailed simulation data is stored in database tables:")
+        print("  📊 simulation: Simulation metadata and final results")
+        print("  📊 news_sentiment: Individual headline sentiment analysis")
+        print("     - Each headline's sentiment, extracted ticker, and simulation ID")
+        print("  📈 daily_recap: Daily trading results and portfolio performance")
+        print("     - Daily P&L, positions, and detailed trade information by simulation")
+        print("  💰 Only summary metrics are saved to JSON files")
+        print(f"{'='*60}")
             
     except KeyboardInterrupt:
         print("\nSimulation interrupted by user")

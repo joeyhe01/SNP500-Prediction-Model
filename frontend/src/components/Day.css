@@ -1,0 +1,391 @@
+.section-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 1.5rem;
+}
+
+.subsection-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #334155;
+  margin-bottom: 1rem;
+}
+
+.day-summary {
+  background: white;
+  padding: 2rem;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  margin-bottom: 2rem;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.summary-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  background: #f8fafc;
+  border-radius: 8px;
+}
+
+.summary-label {
+  font-weight: 600;
+  color: #64748b;
+}
+
+.summary-value {
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+.summary-value.positive {
+  color: #059669;
+}
+
+.summary-value.negative {
+  color: #dc2626;
+}
+
+.trades-section {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 2rem;
+}
+
+.trades-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.trade-item {
+  background: #f8fafc;
+  padding: 1rem;
+  border-radius: 8px;
+  border-left: 4px solid #667eea;
+}
+
+.trade-main {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.trade-action {
+  padding: 0.25rem 0.75rem;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+}
+
+.trade-action.buy {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.trade-action.sell {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.trade-ticker {
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.trade-shares {
+  color: #64748b;
+}
+
+.trade-price {
+  color: #64748b;
+}
+
+.trade-total {
+  font-weight: 600;
+  color: #334155;
+  font-size: 0.875rem;
+}
+
+.trade-timing {
+  padding: 0.25rem 0.5rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.trade-timing.market_open {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.trade-timing.market_close {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.trade-details {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+.trade-pnl {
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.trade-pnl.positive {
+  color: #059669;
+}
+
+.trade-pnl.negative {
+  color: #dc2626;
+}
+
+.news-section {
+  background: white;
+  padding: 2rem;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.news-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.no-news {
+  text-align: center;
+  padding: 3rem;
+  color: #64748b;
+  font-style: italic;
+}
+
+.news-item {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1.5rem;
+  transition: all 0.2s ease;
+}
+
+.news-item:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.news-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.news-meta {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.news-source {
+  font-weight: 600;
+  color: #667eea;
+  font-size: 0.875rem;
+}
+
+.news-time {
+  font-size: 0.875rem;
+  color: #64748b;
+}
+
+.analysis-status {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 12px;
+  font-weight: 500;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.news-sentiment-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sentiment-badge {
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.sentiment-badge.sentiment-positive {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.sentiment-badge.sentiment-negative {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.sentiment-badge.sentiment-neutral {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.sentiment-badge.sentiment-no-analysis {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px dashed #d97706;
+}
+
+.news-item.not-analyzed {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.news-item.analyzed {
+  border-color: #e2e8f0;
+  background: white;
+}
+
+.news-item.not-analyzed:hover {
+  border-color: #f59e0b;
+}
+
+.analysis-details {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.analysis-details details {
+  cursor: pointer;
+}
+
+.analysis-details summary {
+  font-weight: 600;
+  color: #667eea;
+  font-size: 0.875rem;
+  margin-bottom: 0.5rem;
+}
+
+.analysis-details pre {
+  background: #f8fafc;
+  padding: 1rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  color: #475569;
+  overflow-x: auto;
+  border: 1px solid #e2e8f0;
+}
+
+.ticker-badge {
+  padding: 0.25rem 0.5rem;
+  background: #667eea;
+  color: white;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.news-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #1e293b;
+  line-height: 1.4;
+  margin-bottom: 1rem;
+}
+
+.news-summary {
+  margin-bottom: 1rem;
+}
+
+.news-summary p {
+  color: #475569;
+  line-height: 1.6;
+  margin-bottom: 0.5rem;
+}
+
+.expand-btn {
+  background: none;
+  border: none;
+  color: #667eea;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 0.875rem;
+  padding: 0;
+}
+
+.expand-btn:hover {
+  text-decoration: underline;
+}
+
+.news-footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.news-link {
+  color: #667eea;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.875rem;
+  transition: all 0.2s ease;
+}
+
+.news-link:hover {
+  color: #5b21b6;
+  text-decoration: underline;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .summary-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+  
+  .summary-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+  
+  .trade-main {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+  
+  .news-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+  
+  .news-meta {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+  
+  .news-sentiment-info {
+    flex-wrap: wrap;
+  }
+} 

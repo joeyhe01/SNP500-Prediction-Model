@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 import json
 import os
 from collections import defaultdict
-from models.database import get_db_session, News
+from models.database import get_db_session, News, NewsSentiment
 from sqlalchemy import and_, or_
 
 class BaseSentimentModel:
@@ -49,16 +49,19 @@ class BaseSentimentModel:
     
     def extract_ticker_from_headline(self, headline):
         """
-        Extract potential stock ticker from headline
-        This is a simple implementation - could be enhanced with NER
+        Extract ticker symbols from news headlines using keyword matching
         
         Args:
             headline: News headline text
             
         Returns:
-            ticker: Extracted ticker or None
+            ticker: Stock ticker symbol or None if not found
         """
-        # Expanded S&P 500 tickers mapping
+        import re
+        
+        headline_lower = headline.lower()
+        
+        # Common stock tickers and their associated keywords
         common_tickers = {
             'AAPL': ['Apple', 'iPhone', 'iPad', 'Mac', 'iOS', 'MacBook'],
             'MSFT': ['Microsoft', 'Windows', 'Azure', 'Office', 'Xbox', 'Surface'],
@@ -250,12 +253,49 @@ class BaseSentimentModel:
         
         return None
     
-    def get_trading_signals(self, date):
+    def store_sentiment_analysis(self, simulation_id, date, news_item, sentiment, ticker):
+        """
+        Store sentiment analysis result in the database
+        
+        Args:
+            simulation_id: ID of the current simulation run
+            date: Trading date
+            news_item: News item from database
+            sentiment: Sentiment analysis result
+            ticker: Extracted ticker symbol
+        """
+        try:
+            # Check if we already have this sentiment analysis for this simulation
+            existing = self.session.query(NewsSentiment).filter(
+                and_(
+                    NewsSentiment.simulation_id == simulation_id,
+                    NewsSentiment.date == date,
+                    NewsSentiment.headline_id == news_item.id
+                )
+            ).first()
+            
+            if not existing:
+                news_sentiment = NewsSentiment(
+                    simulation_id=simulation_id,
+                    date=date,
+                    headline_id=news_item.id,
+                    sentiment=sentiment,
+                    ticker=ticker,
+                    extra_data={}  # Will be populated later for vector db
+                )
+                self.session.add(news_sentiment)
+                self.session.commit()
+        except Exception as e:
+            print(f"Error storing sentiment analysis: {e}")
+            self.session.rollback()
+    
+    def get_trading_signals(self, date, simulation_id):
         """
         Get trading signals for a specific date based on news sentiment
         
         Args:
             date: datetime.date object
+            simulation_id: ID of the current simulation run
             
         Returns:
             dict with 'long' and 'short' lists of tickers
@@ -282,56 +322,51 @@ class BaseSentimentModel:
         
         print(f"Found {len(relevant_news)} news articles for {date} from database")
         
-        # Analyze sentiment for each article
+        # Analyze sentiment for each article and store in database
         ticker_sentiments = defaultdict(list)
         
         if self.debug:
             ticker_extraction_stats = defaultdict(int)
             no_ticker_count = 0
         
-        for i, article in enumerate(relevant_news):
-            headline = article.title
-            if not headline:
-                continue
+        for news_item in relevant_news:
+            # Extract ticker from headline
+            ticker = self.extract_ticker_from_headline(news_item.title)
             
-            # Extract ticker
-            ticker = self.extract_ticker_from_headline(headline)
-            if not ticker:
-                if self.debug and no_ticker_count < 5:  # Show first 5 headlines without tickers
-                    print(f"  No ticker found in: {headline[:100]}...")
-                    no_ticker_count += 1
-                continue
-            
-            if self.debug:
-                ticker_extraction_stats[ticker] += 1
-            
-            # Analyze sentiment
-            sentiment = self.analyze_headline_sentiment(headline, ticker)
-            
-            # Convert to score
-            if sentiment == 'positive':
-                score = 1.0
-            elif sentiment == 'negative':
-                score = -1.0
+            if ticker:
+                # Analyze sentiment
+                sentiment = self.analyze_headline_sentiment(news_item.title, ticker)
+                
+                # Store in database with simulation_id
+                self.store_sentiment_analysis(simulation_id, date, news_item, sentiment, ticker)
+                
+                # Convert sentiment to score for aggregation
+                if sentiment == 'positive':
+                    score = 1
+                elif sentiment == 'negative':
+                    score = -1  
+                else:
+                    score = 0
+                
+                ticker_sentiments[ticker].append(score)
+                
+                if self.debug:
+                    ticker_extraction_stats[ticker] += 1
+                    print(f"  {news_item.title[:80]}... -> {ticker} ({sentiment})")
             else:
-                score = 0.0
-            
-            ticker_sentiments[ticker].append(score)
-            
-            if self.debug and i < 10:  # Show first 10 extractions
-                print(f"  {ticker}: {sentiment} - {headline[:80]}...")
+                if self.debug:
+                    no_ticker_count += 1
         
         if self.debug:
             print(f"\nTicker extraction stats:")
             for ticker, count in sorted(ticker_extraction_stats.items(), key=lambda x: x[1], reverse=True)[:10]:
-                print(f"  {ticker}: {count} mentions")
-            print(f"  Articles with no ticker found: {no_ticker_count}")
+                print(f"  {ticker}: {count} headlines")
+            print(f"  No ticker found: {no_ticker_count} headlines")
         
-        # Calculate average sentiment for each ticker
+        # Calculate average sentiment scores by ticker
         ticker_scores = {}
-        for ticker, scores in ticker_sentiments.items():
-            avg_score = sum(scores) / len(scores)
-            ticker_scores[ticker] = avg_score
+        for ticker, sentiments in ticker_sentiments.items():
+            ticker_scores[ticker] = sum(sentiments) / len(sentiments)
         
         if self.debug:
             print(f"\nTicker sentiment scores:")

@@ -41,6 +41,7 @@ logs/
 
 # Database files
 data/stock_prices.db
+trading_data.db
 
 # Simulation results
 results/ 

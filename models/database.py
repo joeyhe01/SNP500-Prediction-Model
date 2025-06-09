@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, String, Float, Date, UniqueConstraint, Integer, DateTime, Index
+from sqlalchemy import create_engine, Column, String, Float, Date, UniqueConstraint, Integer, DateTime, Index, Text, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
@@ -43,14 +43,62 @@ class News(Base):
         return f"<News(id={self.id}, title='{self.title[:50]}...', time_published='{self.time_published}')>"
 
 
+class Simulation(Base):
+    __tablename__ = 'simulation'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    executed_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    extra_data = Column(JSON)  # For storing simulation results and metadata
+    
+    def __repr__(self):
+        return f"<Simulation(id={self.id}, executed_at='{self.executed_at}')>"
+
+
+class NewsSentiment(Base):
+    __tablename__ = 'news_sentiment'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    simulation_id = Column(Integer, nullable=False, index=True)  # References simulation.id
+    date = Column(Date, nullable=False, index=True)
+    headline_id = Column(Integer, nullable=False)  # References news.id
+    sentiment = Column(String, nullable=False)  # 'positive', 'negative', 'neutral'
+    ticker = Column(String)  # Extracted ticker from headline
+    extra_data = Column(JSON)  # For future vector db use
+    
+    __table_args__ = (
+        Index('idx_news_sentiment_simulation', 'simulation_id'),
+        Index('idx_news_sentiment_date', 'date'),
+        Index('idx_news_sentiment_ticker', 'ticker'),
+    )
+    
+    def __repr__(self):
+        return f"<NewsSentiment(id={self.id}, simulation_id={self.simulation_id}, date='{self.date}', headline_id={self.headline_id}, sentiment='{self.sentiment}', ticker='{self.ticker}')>"
+
+
+class DailyRecap(Base):
+    __tablename__ = 'daily_recap'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    simulation_id = Column(Integer, nullable=False, index=True)  # References simulation.id
+    date = Column(Date, nullable=False, index=True)
+    starting_money = Column(Float, nullable=False)
+    ending_money = Column(Float, nullable=False)
+    extra_data = Column(JSON)  # Contains shorts, longs, and returns for each action
+    
+    __table_args__ = (
+        Index('idx_daily_recap_simulation', 'simulation_id'),
+        Index('idx_daily_recap_date', 'date'),
+    )
+    
+    def __repr__(self):
+        return f"<DailyRecap(id={self.id}, simulation_id={self.simulation_id}, date='{self.date}', starting_money={self.starting_money}, ending_money={self.ending_money})>"
+
+
 # Database setup
 def get_db_session():
     """Create and return a database session"""
-    # Create data directory if it doesn't exist
-    os.makedirs('data', exist_ok=True)
-    
-    # Create SQLite database
-    engine = create_engine('sqlite:///data/stock_prices.db')
+    # Create SQLite database in root directory
+    engine = create_engine('sqlite:///trading_data.db')
     Base.metadata.create_all(engine)
     
     # Create session
