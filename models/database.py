@@ -94,6 +94,24 @@ class DailyRecap(Base):
         return f"<DailyRecap(id={self.id}, simulation_id={self.simulation_id}, date='{self.date}', starting_money={self.starting_money}, ending_money={self.ending_money})>"
 
 
+class RealtimePrediction(Base):
+    __tablename__ = 'realtime_predictions'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(DateTime, nullable=False, index=True)
+    prediction_data = Column(JSON, nullable=False)  # Full prediction data
+    long_tickers = Column(JSON)  # List of tickers for long positions
+    short_tickers = Column(JSON)  # List of tickers for short positions
+    market_sentiment_score = Column(Float)  # Overall market sentiment
+    
+    __table_args__ = (
+        Index('idx_realtime_predictions_timestamp', 'timestamp'),
+    )
+    
+    def __repr__(self):
+        return f"<RealtimePrediction(id={self.id}, timestamp='{self.timestamp}', market_sentiment={self.market_sentiment_score})>"
+
+
 # Database setup
 def get_db_session():
     """Create and return a database session"""

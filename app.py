@@ -5,8 +5,8 @@ Flask web application for S&P 500 trading simulation analysis
 
 from flask import Flask, jsonify, request, send_from_directory, send_file
 from models.database import get_db_session
-from models.database import Simulation, DailyRecap, NewsSentiment, News
-from sqlalchemy import desc, asc, func, cast, Date
+from models.database import Simulation, DailyRecap, NewsSentiment, News, RealtimePrediction
+from sqlalchemy import desc, asc, func, cast, Date, and_
 from datetime import datetime, timedelta
 import json
 import os
@@ -283,6 +283,374 @@ def delete_simulation(simulation_id):
     except Exception as e:
         session.rollback()
         return jsonify({'error': f'Failed to delete simulation: {str(e)}'}), 500
+    finally:
+        session.close()
+
+# ============== REALTIME TRADING ENDPOINTS ==============
+
+@app.route('/api/realtime/fetch-data', methods=['POST'])
+def fetch_realtime_data():
+    """Fetch fresh news data from APIs and store in database"""
+    try:
+        from realtime.news_aggregator import RealtimeNewsAggregator
+        
+        # Create aggregator instance
+        aggregator = RealtimeNewsAggregator()
+        
+        try:
+            # Run the news aggregation
+            news_articles = aggregator.run_realtime_aggregation()
+            
+            result = {
+                'success': True,
+                'message': f'Successfully fetched and stored {len(news_articles)} articles',
+                'articles_fetched': len(news_articles),
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            return jsonify(result)
+        finally:
+            aggregator.close()
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/realtime/generate-prediction', methods=['POST'])
+def generate_realtime_prediction():
+    """Generate a new realtime trading prediction using only database data"""
+    try:
+        from realtime.realtime_predictor import RealtimeTradingPredictor
+        
+        # Create predictor instance with database_only mode
+        predictor = RealtimeTradingPredictor(debug=False, database_only=True)
+        
+        try:
+            # Run the prediction pipeline (database only)
+            result = predictor.run_realtime_prediction()
+            return jsonify(result)
+        finally:
+            predictor.close()
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/realtime/latest-prediction')
+def get_latest_realtime_prediction():
+    """Get the most recent realtime prediction"""
+    session = get_db_session()
+    
+    try:
+        # Get the latest prediction
+        latest_prediction = session.query(RealtimePrediction)\
+            .order_by(desc(RealtimePrediction.timestamp))\
+            .first()
+        
+        if not latest_prediction:
+            return jsonify({
+                'success': False,
+                'message': 'No predictions found',
+                'prediction': None
+            })
+        
+        result = {
+            'success': True,
+            'prediction': {
+                'id': latest_prediction.id,
+                'timestamp': latest_prediction.timestamp.isoformat(),
+                'prediction_data': latest_prediction.prediction_data,
+                'long_tickers': latest_prediction.long_tickers,
+                'short_tickers': latest_prediction.short_tickers,
+                'market_sentiment_score': latest_prediction.market_sentiment_score
+            }
+        }
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+    finally:
+        session.close()
+
+@app.route('/api/realtime/predictions')
+def get_realtime_predictions():
+    """Get recent realtime predictions"""
+    session = get_db_session()
+    
+    try:
+        # Get the last 10 predictions
+        predictions = session.query(RealtimePrediction)\
+            .order_by(desc(RealtimePrediction.timestamp))\
+            .limit(10)\
+            .all()
+        
+        result = []
+        for pred in predictions:
+            result.append({
+                'id': pred.id,
+                'timestamp': pred.timestamp.isoformat(),
+                'prediction_data': pred.prediction_data,
+                'long_tickers': pred.long_tickers,
+                'short_tickers': pred.short_tickers,
+                'market_sentiment_score': pred.market_sentiment_score
+            })
+        
+        return jsonify({
+            'success': True,
+            'predictions': result
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+    finally:
+        session.close()
+
+@app.route('/api/realtime/prediction/<int:prediction_id>')
+def get_realtime_prediction_details(prediction_id):
+    """Get detailed articles and sentiment data for a specific realtime prediction"""
+    session = get_db_session()
+    
+    try:
+        # Get the prediction
+        prediction = session.query(RealtimePrediction).filter_by(id=prediction_id).first()
+        if not prediction:
+            return jsonify({'error': 'Prediction not found'}), 404
+        
+        # Get the time range for this prediction using the same logic as news aggregator
+        prediction_time = prediction.timestamp
+        
+        # Use the same time range logic as RealtimeNewsAggregator.get_time_range()
+        # But apply it to the prediction timestamp, not current time
+        current_time = prediction_time.time()
+        
+        # If prediction was before 9 AM, get from previous day 5PM to prediction time
+        if current_time < datetime.strptime('09:00', '%H:%M').time():
+            end_time = prediction_time
+            start_time = prediction_time.replace(hour=17, minute=0, second=0, microsecond=0) - timedelta(days=1)
+        else:
+            # If prediction was after 9 AM, get from previous day 5PM to same day 9AM
+            # BUT since we're looking at historical data, we need to be more flexible
+            # Let's get from previous day 5PM to the prediction time
+            start_time = prediction_time.replace(hour=17, minute=0, second=0, microsecond=0) - timedelta(days=1)
+            end_time = prediction_time
+            
+        # Skip weekends for start_time
+        while start_time.weekday() > 4:  # Saturday=5, Sunday=6
+            start_time = start_time - timedelta(days=1)
+        
+        # Get all news articles from this time range
+        news_articles = session.query(News).filter(
+            and_(
+                News.time_published >= start_time,
+                News.time_published <= end_time
+            )
+        ).order_by(News.time_published.desc()).all()
+        
+        # If no articles found in the calculated range, expand to include the full day
+        if not news_articles:
+            # Expand to full day of prediction
+            day_start = prediction_time.replace(hour=0, minute=0, second=0, microsecond=0)
+            day_end = prediction_time.replace(hour=23, minute=59, second=59, microsecond=999999)
+            
+            news_articles = session.query(News).filter(
+                and_(
+                    News.time_published >= day_start,
+                    News.time_published <= day_end
+                )
+            ).order_by(News.time_published.desc()).all()
+            
+            # Update the time range for display
+            start_time = day_start
+            end_time = day_end
+        
+        # Now analyze which articles would have been used for this prediction
+        # (We'll re-run the sentiment analysis to match what was actually used)
+        from models.base_sentiment_model import BaseSentimentModel
+        sentiment_model = BaseSentimentModel(debug=False)
+        
+        analyzed_articles = []
+        ticker_mentions = {}
+        
+        for news_item in news_articles:
+            try:
+                # Extract ticker from headline (same logic as predictor)
+                ticker = sentiment_model.extract_ticker_from_headline(news_item.title)
+                
+                if ticker:
+                    # Analyze sentiment
+                    sentiment = sentiment_model.analyze_headline_sentiment(news_item.title, ticker)
+                    
+                    analyzed_articles.append({
+                        'headline_id': news_item.id,
+                        'title': news_item.title,
+                        'summary': news_item.summary,
+                        'source': news_item.source,
+                        'url': news_item.url,
+                        'time_published': news_item.time_published.strftime('%Y-%m-%d %H:%M:%S'),
+                        'sentiment': sentiment,
+                        'identified_ticker': ticker,
+                        'has_analysis': True,
+                        'used_for_prediction': True
+                    })
+                    
+                    # Track ticker mentions for summary
+                    if ticker not in ticker_mentions:
+                        ticker_mentions[ticker] = {'positive': 0, 'negative': 0, 'neutral': 0}
+                    ticker_mentions[ticker][sentiment] += 1
+                else:
+                    # Include articles without ticker mentions too
+                    analyzed_articles.append({
+                        'headline_id': news_item.id,
+                        'title': news_item.title,
+                        'summary': news_item.summary,
+                        'source': news_item.source,
+                        'url': news_item.url,
+                        'time_published': news_item.time_published.strftime('%Y-%m-%d %H:%M:%S'),
+                        'sentiment': None,
+                        'identified_ticker': None,
+                        'has_analysis': False,
+                        'used_for_prediction': False
+                    })
+                    
+            except Exception as e:
+                print(f"Error analyzing article {news_item.id}: {e}")
+                continue
+        
+        sentiment_model.close()
+        
+        result = {
+            'prediction_id': prediction_id,
+            'timestamp': prediction.timestamp.isoformat(),
+            'prediction_data': prediction.prediction_data,
+            'long_tickers': prediction.long_tickers,
+            'short_tickers': prediction.short_tickers,
+            'market_sentiment_score': prediction.market_sentiment_score,
+            'time_range': {
+                'start': start_time.strftime('%Y-%m-%d %H:%M:%S'),
+                'end': end_time.strftime('%Y-%m-%d %H:%M:%S')
+            },
+            'articles_analyzed': len([a for a in analyzed_articles if a['has_analysis']]),
+            'total_articles': len(analyzed_articles),
+            'ticker_summary': ticker_mentions,
+            'news_analysis': analyzed_articles
+        }
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+@app.route('/api/realtime/prediction-status')
+def get_realtime_prediction_status():
+    """Get status information about realtime predictions"""
+    session = get_db_session()
+    
+    try:
+        # Get latest prediction timestamp
+        latest_prediction = session.query(RealtimePrediction)\
+            .order_by(desc(RealtimePrediction.timestamp))\
+            .first()
+        
+        # Count total predictions today
+        today = datetime.now().date()
+        predictions_today = session.query(RealtimePrediction)\
+            .filter(func.date(RealtimePrediction.timestamp) == today)\
+            .count()
+        
+        # Count total predictions
+        total_predictions = session.query(RealtimePrediction).count()
+        
+        result = {
+            'success': True,
+            'status': {
+                'latest_prediction_time': latest_prediction.timestamp.isoformat() if latest_prediction else None,
+                'predictions_today': predictions_today,
+                'total_predictions': total_predictions,
+                'system_time': datetime.now().isoformat()
+            }
+        }
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+    finally:
+        session.close()
+
+@app.route('/api/realtime/data-status')
+def get_realtime_data_status():
+    """Get status information about the news data in database"""
+    session = get_db_session()
+    
+    try:
+        # Get latest news article timestamp
+        latest_news = session.query(News)\
+            .order_by(desc(News.time_published))\
+            .first()
+        
+        # Count news articles today
+        today = datetime.now().date()
+        news_today = session.query(News)\
+            .filter(func.date(News.time_published) == today)\
+            .count()
+        
+        # Count total news articles
+        total_news = session.query(News).count()
+        
+        # Get time range that would be used for prediction
+        from realtime.news_aggregator import RealtimeNewsAggregator
+        aggregator = RealtimeNewsAggregator()
+        start_time, end_time = aggregator.get_time_range()
+        aggregator.close()
+        
+        # Count articles in current prediction time range
+        articles_in_range = session.query(News).filter(
+            and_(
+                News.time_published >= start_time,
+                News.time_published <= end_time
+            )
+        ).count()
+        
+        result = {
+            'success': True,
+            'data_status': {
+                'latest_news_time': latest_news.time_published.isoformat() if latest_news else None,
+                'news_today': news_today,
+                'total_news': total_news,
+                'articles_in_prediction_range': articles_in_range,
+                'prediction_time_range': {
+                    'start': start_time.isoformat(),
+                    'end': end_time.isoformat()
+                },
+                'system_time': datetime.now().isoformat()
+            }
+        }
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
     finally:
         session.close()
 

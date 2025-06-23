@@ -60,69 +60,44 @@ const Dashboard = () => {
 
   if (loading) {
     return (
-      <div>
-        <div className="header">
-          <h1>S&P 500 Trading Simulation Dashboard</h1>
-          <p>Interactive analysis of algorithmic trading performance</p>
-        </div>
-        <div className="container">
-          <div className="loading">Loading simulation data...</div>
-        </div>
+      <div className="dashboard-content">
+        <div className="loading">Loading simulation data...</div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div>
-        <div className="header">
-          <h1>S&P 500 Trading Simulation Dashboard</h1>
-          <p>Interactive analysis of algorithmic trading performance</p>
-        </div>
-        <div className="container">
-          <div className="error">{error}</div>
-        </div>
+      <div className="dashboard-content">
+        <div className="error">{error}</div>
       </div>
     );
   }
 
   if (simulations.length === 0) {
     return (
-      <div>
-        <div className="header">
-          <h1>S&P 500 Trading Simulation Dashboard</h1>
-          <p>Interactive analysis of algorithmic trading performance</p>
-        </div>
-        <div className="container">
-          <div className="no-data">
-            <h3>No Simulation Data Found</h3>
-            <p>Run some simulations to see performance analysis here.</p>
-            <button className="btn" onClick={loadData}>Refresh</button>
-          </div>
+      <div className="dashboard-content">
+        <div className="no-data">
+          <h3>No Simulation Data Found</h3>
+          <p>Run some simulations to see performance analysis here.</p>
+          <button className="btn" onClick={loadData}>Refresh</button>
         </div>
       </div>
     );
   }
 
   return (
-    <div>
-      <div className="header">
-        <h1>S&P 500 Trading Simulation Dashboard</h1>
-        <p>Interactive analysis of algorithmic trading performance</p>
-      </div>
-      
-      <div className="container">
-        <div className="simulations-list">
-          {simulations.map(simulation => (
-            <SimulationRow 
-              key={simulation.id} 
-              simulation={simulation} 
-              onNavigate={() => navigate(`/simulation/${simulation.id}`)}
-              onDelete={() => deleteSimulation(simulation.id)}
-              isDeleting={deletingId === simulation.id}
-            />
-          ))}
-        </div>
+    <div className="dashboard-content">
+      <div className="simulations-list">
+        {simulations.map(simulation => (
+          <SimulationRow 
+            key={simulation.id} 
+            simulation={simulation} 
+            onNavigate={() => navigate(`/simulation/${simulation.id}`)}
+            onDelete={() => deleteSimulation(simulation.id)}
+            isDeleting={deletingId === simulation.id}
+          />
+        ))}
       </div>
     </div>
   );
