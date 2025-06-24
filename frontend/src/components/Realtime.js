@@ -284,8 +284,11 @@ const Realtime = () => {
                       <div key={index} className="signal-item">
                         <span className="ticker">{signal.ticker}</span>
                         <div className="signal-details">
-                          <span className="score">Score: {signal.score.toFixed(3)}</span>
-                          <span className="articles">{signal.article_count} articles</span>
+                          <span className="score">Net: {signal.net_sentiment > 0 ? '+' : ''}{signal.net_sentiment}</span>
+                          <span className="sentiment-breakdown">
+                            ({signal.positive_count}+ / {signal.negative_count}-)
+                          </span>
+                          <span className="articles">{signal.total_articles} articles</span>
                         </div>
                       </div>
                     ))}
@@ -303,8 +306,11 @@ const Realtime = () => {
                       <div key={index} className="signal-item">
                         <span className="ticker">{signal.ticker}</span>
                         <div className="signal-details">
-                          <span className="score">Score: {signal.score.toFixed(3)}</span>
-                          <span className="articles">{signal.article_count} articles</span>
+                          <span className="score">Net: {signal.net_sentiment > 0 ? '+' : ''}{signal.net_sentiment}</span>
+                          <span className="sentiment-breakdown">
+                            ({signal.positive_count}+ / {signal.negative_count}-)
+                          </span>
+                          <span className="articles">{signal.total_articles} articles</span>
                         </div>
                       </div>
                     ))}

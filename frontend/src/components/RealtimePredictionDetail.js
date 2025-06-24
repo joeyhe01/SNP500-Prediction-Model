@@ -129,9 +129,9 @@ const RealtimePredictionDetail = () => {
           {/* Market Sentiment */}
           <div className="market-sentiment-section">
             <h3>Market Sentiment</h3>
-            <div className={`sentiment-display ${getSentimentClass(data.market_sentiment_score)}`}>
-              <span className="sentiment-score">{data.market_sentiment_score.toFixed(3)}</span>
-              <span className="sentiment-label">{getSentimentLabel(data.market_sentiment_score)}</span>
+            <div className={`sentiment-display ${getSentimentClass(data.market_sentiment_score || 0)}`}>
+              <span className="sentiment-score">{(data.market_sentiment_score || 0).toFixed(3)}</span>
+              <span className="sentiment-label">{getSentimentLabel(data.market_sentiment_score || 0)}</span>
             </div>
           </div>
 
@@ -206,8 +206,9 @@ const RealtimePredictionDetail = () => {
                         <div key={index} className="original-signal-item">
                           <span className="signal-ticker">{signal.ticker}</span>
                           <div className="signal-metrics">
-                            <span className="signal-score">Score: {signal.score.toFixed(3)}</span>
-                            <span className="signal-articles">{signal.article_count} articles</span>
+                            <span className="signal-score">Net: {signal.net_sentiment > 0 ? '+' : ''}{signal.net_sentiment}</span>
+                            <span className="signal-breakdown">({signal.positive_count}+ / {signal.negative_count}-)</span>
+                            <span className="signal-articles">{signal.total_articles} articles</span>
                           </div>
                         </div>
                       ))}
@@ -225,8 +226,9 @@ const RealtimePredictionDetail = () => {
                         <div key={index} className="original-signal-item">
                           <span className="signal-ticker">{signal.ticker}</span>
                           <div className="signal-metrics">
-                            <span className="signal-score">Score: {signal.score.toFixed(3)}</span>
-                            <span className="signal-articles">{signal.article_count} articles</span>
+                            <span className="signal-score">Net: {signal.net_sentiment > 0 ? '+' : ''}{signal.net_sentiment}</span>
+                            <span className="signal-breakdown">({signal.positive_count}+ / {signal.negative_count}-)</span>
+                            <span className="signal-articles">{signal.total_articles} articles</span>
                           </div>
                         </div>
                       ))}

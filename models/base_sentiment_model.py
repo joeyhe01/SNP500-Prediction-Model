@@ -323,7 +323,7 @@ class BaseSentimentModel:
         print(f"Found {len(relevant_news)} news articles for {date} from database")
         
         # Analyze sentiment for each article and store in database
-        ticker_sentiments = defaultdict(list)
+        ticker_sentiment_counts = defaultdict(lambda: {'positive': 0, 'negative': 0, 'neutral': 0})
         
         if self.debug:
             ticker_extraction_stats = defaultdict(int)
@@ -340,15 +340,8 @@ class BaseSentimentModel:
                 # Store in database with simulation_id
                 self.store_sentiment_analysis(simulation_id, date, news_item, sentiment, ticker)
                 
-                # Convert sentiment to score for aggregation
-                if sentiment == 'positive':
-                    score = 1
-                elif sentiment == 'negative':
-                    score = -1  
-                else:
-                    score = 0
-                
-                ticker_sentiments[ticker].append(score)
+                # Count sentiments by type
+                ticker_sentiment_counts[ticker][sentiment] += 1
                 
                 if self.debug:
                     ticker_extraction_stats[ticker] += 1
@@ -363,31 +356,34 @@ class BaseSentimentModel:
                 print(f"  {ticker}: {count} headlines")
             print(f"  No ticker found: {no_ticker_count} headlines")
         
-        # Calculate average sentiment scores by ticker
-        ticker_scores = {}
-        for ticker, sentiments in ticker_sentiments.items():
-            ticker_scores[ticker] = sum(sentiments) / len(sentiments)
+        # Calculate net sentiment (positive - negative) for each ticker
+        ticker_net_sentiment = {}
+        for ticker, counts in ticker_sentiment_counts.items():
+            net_sentiment = counts['positive'] - counts['negative']
+            ticker_net_sentiment[ticker] = net_sentiment
         
         if self.debug:
-            print(f"\nTicker sentiment scores:")
-            for ticker, score in sorted(ticker_scores.items(), key=lambda x: x[1], reverse=True)[:10]:
-                print(f"  {ticker}: {score:.2f} (from {len(ticker_sentiments[ticker])} articles)")
+            print(f"\nTicker net sentiment (positive - negative):")
+            for ticker, net_sentiment in sorted(ticker_net_sentiment.items(), key=lambda x: x[1], reverse=True)[:10]:
+                counts = ticker_sentiment_counts[ticker]
+                total_articles = counts['positive'] + counts['negative'] + counts['neutral']
+                print(f"  {ticker}: {net_sentiment:+d} (pos:{counts['positive']}, neg:{counts['negative']}, neu:{counts['neutral']}, total:{total_articles})")
         
-        # Sort tickers by sentiment score
-        sorted_tickers = sorted(ticker_scores.items(), key=lambda x: x[1], reverse=True)
+        # Sort tickers by net sentiment (positive - negative)
+        sorted_tickers = sorted(ticker_net_sentiment.items(), key=lambda x: x[1], reverse=True)
         
-        # Get top 5 for long and bottom 5 for short
+        # Get top 5 for long (highest positive-negative) and bottom 5 for short (lowest positive-negative)
         long_tickers = []
         short_tickers = []
         
-        # Get positive sentiment stocks for long
-        for ticker, score in sorted_tickers:
-            if score > 0 and len(long_tickers) < 5:
+        # Get tickers with highest net positive sentiment for long positions
+        for ticker, net_sentiment in sorted_tickers:
+            if net_sentiment > 0 and len(long_tickers) < 5:
                 long_tickers.append(ticker)
         
-        # Get negative sentiment stocks for short
-        for ticker, score in reversed(sorted_tickers):
-            if score < 0 and len(short_tickers) < 5:
+        # Get tickers with lowest net sentiment (most negative) for short positions
+        for ticker, net_sentiment in reversed(sorted_tickers):
+            if net_sentiment < 0 and len(short_tickers) < 5:
                 short_tickers.append(ticker)
         
         # Ensure equal number of long and short positions

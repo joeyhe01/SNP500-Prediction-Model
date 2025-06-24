@@ -26,13 +26,14 @@ class RealtimeNewsAggregator:
         # API Keys - should be set as environment variables
         self.alpha_vantage_key = os.getenv('ALPHA_VANTAGE_API_KEY', 'KWL2J50Q32KS3YSM')
         self.newsapi_key = os.getenv('NEWSAPI_KEY')  # Get from newsapi.org
-        self.finnhub_key = os.getenv('FINNHUB_KEY')  # Get from finnhub.io
+        # Use the same Finnhub API key as in the working fetcher
+        self.finnhub_key = os.getenv('FINNHUB_KEY', 'd0p1oc1r01qr8ds0v5j0d0p1oc1r01qr8ds0v5jg')
         self.polygon_key = os.getenv('POLYGON_KEY')  # Get from polygon.io
         self.fmp_key = os.getenv('FMP_KEY')  # Get from financialmodelingprep.com
         
         # Initialize API clients
         self.newsapi = NewsApiClient(api_key=self.newsapi_key) if self.newsapi_key else None
-        self.finnhub_client = finnhub.Client(api_key=self.finnhub_key) if self.finnhub_key else None
+        self.finnhub_client = finnhub.Client(api_key=self.finnhub_key)  # Always initialize with fallback key
         self.polygon_client = RESTClient(self.polygon_key) if self.polygon_key else None
         
         self.db_session = get_db_session()
@@ -155,38 +156,95 @@ class RealtimeNewsAggregator:
             
         return news_articles
 
-    def fetch_finnhub_news(self, start_time: datetime, end_time: datetime) -> List[Dict]:
-        """Fetch news from Finnhub"""
-        news_articles = []
+    def fetch_finnhub_news(self, start_time: datetime, end_time: datetime) -> int:
+        """Fetch company-specific news from Finnhub for all tickers and save directly to DB"""
+        total_saved = 0
         
         if not self.finnhub_client:
             logger.warning("Finnhub client not initialized - missing API key")
-            return news_articles
+            return total_saved
             
+        # All tickers from the sentiment model
+        tickers = [
+            'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'TSLA', 'NVDA', 'JPM', 'JNJ', 'V',
+            'PG', 'UNH', 'HD', 'MA', 'DIS', 'BAC', 'NFLX', 'ADBE', 'CRM', 'PFE',
+            'CSCO', 'INTC', 'WMT', 'IBM', 'BA', 'GS', 'MS', 'CVX', 'XOM', 'VZ',
+            'T', 'KO', 'PEP', 'NKE', 'MRK', 'ABBV', 'TMO', 'COST', 'AVGO', 'ORCL',
+            'ACN', 'LLY', 'TXN', 'MCD', 'QCOM', 'DHR', 'NEE', 'BMY', 'UPS', 'RTX',
+            'LOW', 'SPGI', 'INTU', 'AMD', 'CAT', 'MDLZ', 'GE', 'MMM', 'CVS', 'AMT',
+            'AXP', 'DE', 'BKNG', 'AMAT', 'TJX', 'ISRG', 'ADP', 'GILD', 'CME', 'TMUS',
+            'REGN', 'C', 'VRTX', 'BLK', 'ZTS', 'NOW', 'PANW', 'SYK', 'BSX', 'SNOW',
+            'UBER', 'SBUX', 'SPOT', 'ABNB', 'PYPL', 'SQ', 'COIN', 'ROKU', 'ZM', 'DOCU',
+            'ETSY', 'SHOP', 'TWLO', 'SNAP', 'PINS', 'LYFT', 'DBX', 'W', 'PTON', 'HOOD',
+            'F', 'GM', 'RIVN', 'LCID', 'NIO', 'LI', 'XPEV', 'PLTR', 'NET', 'DDOG',
+            'CRWD', 'OKTA', 'MDB', 'TEAM', 'FTNT', 'WDAY', 'ADSK', 'EA', 'TTWO', 'ATVI',
+            'RBLX', 'U', 'MSCI', 'MCO', 'ICE', 'NDAQ', 'CBOE', 'WFC', 'USB', 'PNC',
+            'TFC', 'SCHW', 'COF', 'AIG', 'MET', 'PRU', 'TRV', 'AFL', 'ALL', 'PGR',
+            'CB', 'HIG', 'WBA', 'CI', 'HUM', 'CNC', 'ELV'
+        ]
+        
         try:
-            # Convert to Unix timestamp
-            start_unix = int(start_time.timestamp())
-            end_unix = int(end_time.timestamp())
+            # Convert to YYYY-MM-DD format for Finnhub API
+            from_date = start_time.strftime('%Y-%m-%d')
+            to_date = end_time.strftime('%Y-%m-%d')
             
-            # General market news
-            news = self.finnhub_client.general_news('general', min_id=0)
+            logger.info(f"Fetching Finnhub company news for {len(tickers)} tickers from {from_date} to {to_date}")
             
-            for article in news:
-                published = datetime.fromtimestamp(article['datetime'])
-                if start_time <= published <= end_time:
-                    news_articles.append({
-                        'title': article.get('headline', ''),
-                        'summary': article.get('summary', ''),
-                        'source': article.get('source', 'Finnhub'),
-                        'url': article.get('url', ''),
-                        'time_published': published,
-                        'api_source': 'finnhub'
-                    })
+            for i, ticker in enumerate(tickers, 1):
+                try:
+                    logger.info(f"Processing ticker {i}/{len(tickers)}: {ticker}")
+                    
+                    # Use the company news endpoint
+                    news = self.finnhub_client.company_news(ticker, _from=from_date, to=to_date)
+                    
+                    logger.info(f"  Got {len(news) if news else 0} articles for {ticker}")
+                    
+                    ticker_saved = 0
+                    if news:  # Check if news is not None or empty
+                        for article in news:
+                            try:
+                                # Convert Unix timestamp to datetime
+                                published = datetime.fromtimestamp(article['datetime'])
+                                
+                                # Check if article is within our time range
+                                if start_time <= published <= end_time:
+                                    # Save directly to database
+                                    try:
+                                        news_item = News(
+                                            title=article.get('headline', '')[:500],  # Truncate if too long
+                                            summary=article.get('summary', '')[:1000] if article.get('summary') else '',
+                                            source=article.get('source', 'Finnhub'),
+                                            url=article.get('url', ''),
+                                            time_published=published
+                                        )
+                                        self.db_session.add(news_item)
+                                        self.db_session.commit()  # Commit immediately
+                                        ticker_saved += 1
+                                    except Exception as db_e:
+                                        # Unique constraint violation or other DB error - skip this article
+                                        self.db_session.rollback()
+                                        continue
+                                        
+                            except Exception as e:
+                                logger.warning(f"  Error processing article for {ticker}: {e}")
+                                continue
+                    
+                    total_saved += ticker_saved
+                    logger.info(f"  Saved {ticker_saved} new articles for {ticker}")
+                    
+                    # Rate limiting - Finnhub allows 30 calls/second
+                    time.sleep(0.1)
+                    
+                except Exception as e:
+                    logger.error(f"Error fetching news for {ticker}: {e}")
+                    continue
+                    
+            logger.info(f"Total saved: {total_saved} articles from Finnhub company news")
                     
         except Exception as e:
-            logger.error(f"Error fetching Finnhub news: {e}")
+            logger.error(f"Error fetching Finnhub company news: {e}")
             
-        return news_articles
+        return total_saved
 
     def fetch_polygon_news(self, start_time: datetime, end_time: datetime) -> List[Dict]:
         """Fetch news from Polygon.io"""
@@ -267,49 +325,24 @@ class RealtimeNewsAggregator:
             
         return news_articles
 
-    def aggregate_all_news(self) -> List[Dict]:
-        """Aggregate news from all available APIs"""
+    def aggregate_all_news(self) -> int:
+        """Fetch and save news directly to database, prioritizing Finnhub company news"""
         start_time, end_time = self.get_time_range()
-        all_news = []
+        total_saved = 0
         
-        logger.info("Starting news aggregation from multiple APIs...")
+        logger.info("Starting news aggregation with focus on Finnhub company news...")
         
-        # Fetch from all APIs
-        apis = [
-            ('Alpha Vantage', self.fetch_alpha_vantage_news),
-            ('NewsAPI', self.fetch_newsapi_news),
-            ('Finnhub', self.fetch_finnhub_news),
-            ('Polygon', self.fetch_polygon_news), 
-            ('FMP', self.fetch_fmp_news)
-        ]
+        # Prioritize Finnhub company news as the main source for ticker-specific news
+        try:
+            logger.info("Fetching from Finnhub company news (PRIMARY SOURCE)...")
+            finnhub_saved = self.fetch_finnhub_news(start_time, end_time)
+            total_saved += finnhub_saved
+            logger.info(f"Saved {finnhub_saved} articles from Finnhub company news")
+        except Exception as e:
+            logger.error(f"Failed to fetch from Finnhub: {e}")
         
-        for api_name, fetch_func in apis:
-            try:
-                logger.info(f"Fetching from {api_name}...")
-                articles = fetch_func(start_time, end_time)
-                all_news.extend(articles)
-                logger.info(f"Fetched {len(articles)} articles from {api_name}")
-            except Exception as e:
-                logger.error(f"Failed to fetch from {api_name}: {e}")
-        
-        # Remove duplicates based on URL and title
-        unique_news = []
-        seen_urls = set()
-        seen_titles = set()
-        
-        for article in all_news:
-            url = article.get('url', '')
-            title = article.get('title', '')
-            
-            if url and url not in seen_urls:
-                seen_urls.add(url)
-                unique_news.append(article)
-            elif title and title not in seen_titles:
-                seen_titles.add(title)
-                unique_news.append(article)
-        
-        logger.info(f"Total unique articles: {len(unique_news)}")
-        return unique_news
+        logger.info(f"Total articles saved to database: {total_saved}")
+        return total_saved
 
     def store_news_in_db(self, news_articles: List[Dict]):
         """Store fetched news in database"""
@@ -347,16 +380,12 @@ class RealtimeNewsAggregator:
         """Main method to run the realtime news aggregation"""
         logger.info("Starting realtime news aggregation...")
         
-        # Aggregate news from all APIs
-        news_articles = self.aggregate_all_news()
+        # Aggregate and save news directly to database
+        total_saved = self.aggregate_all_news()
         
-        # Store in database
-        if news_articles:
-            self.store_news_in_db(news_articles)
-        else:
-            logger.info("No news articles found for the specified time range")
+        logger.info(f"Realtime aggregation completed: {total_saved} articles saved to database")
         
-        return news_articles
+        return total_saved
 
     def close(self):
         """Close database session"""
@@ -367,6 +396,6 @@ if __name__ == "__main__":
     aggregator = RealtimeNewsAggregator()
     try:
         articles = aggregator.run_realtime_aggregation()
-        print(f"Successfully aggregated {len(articles)} articles")
+        print(f"Successfully aggregated {articles} articles")
     finally:
         aggregator.close() 

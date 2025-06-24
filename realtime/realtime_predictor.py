@@ -114,60 +114,63 @@ class RealtimeTradingPredictor:
         """Generate trading signals based on sentiment analysis"""
         logger.info("Generating trading signals...")
         
-        # Aggregate sentiment scores by ticker
-        ticker_sentiments = defaultdict(list)
+        # Count sentiment types by ticker
+        ticker_sentiment_counts = defaultdict(lambda: {'positive': 0, 'negative': 0, 'neutral': 0})
         ticker_articles = defaultdict(list)
         
         for article in analyzed_articles:
             ticker = article['ticker']
             sentiment = article['sentiment']
             
-            # Convert sentiment to score
-            if sentiment == 'positive':
-                score = 1
-            elif sentiment == 'negative':
-                score = -1
-            else:
-                score = 0
-            
-            ticker_sentiments[ticker].append(score)
+            # Count sentiments by type
+            ticker_sentiment_counts[ticker][sentiment] += 1
             ticker_articles[ticker].append(article)
         
-        # Calculate average sentiment scores
-        ticker_scores = {}
-        for ticker, sentiments in ticker_sentiments.items():
-            ticker_scores[ticker] = {
-                'score': sum(sentiments) / len(sentiments),
-                'article_count': len(sentiments),
+        # Calculate net sentiment (positive - negative) for each ticker
+        ticker_net_scores = {}
+        for ticker, counts in ticker_sentiment_counts.items():
+            net_sentiment = counts['positive'] - counts['negative']
+            total_articles = counts['positive'] + counts['negative'] + counts['neutral']
+            
+            ticker_net_scores[ticker] = {
+                'net_sentiment': net_sentiment,
+                'positive_count': counts['positive'],
+                'negative_count': counts['negative'],
+                'neutral_count': counts['neutral'],
+                'total_articles': total_articles,
                 'articles': ticker_articles[ticker]
             }
         
-        # Sort tickers by sentiment score
-        sorted_tickers = sorted(ticker_scores.items(), key=lambda x: x[1]['score'], reverse=True)
+        # Sort tickers by net sentiment (positive - negative)
+        sorted_tickers = sorted(ticker_net_scores.items(), key=lambda x: x[1]['net_sentiment'], reverse=True)
         
         # Get trading signals
         long_signals = []
         short_signals = []
         
-        # Get top positive sentiment stocks for long positions
+        # Get tickers with highest net positive sentiment for long positions
         for ticker, data in sorted_tickers:
-            if data['score'] > 0 and len(long_signals) < 5:
+            if data['net_sentiment'] > 0 and len(long_signals) < 5:
                 long_signals.append({
                     'ticker': ticker,
-                    'score': data['score'],
-                    'article_count': data['article_count'],
-                    'signal_strength': abs(data['score']),
+                    'net_sentiment': data['net_sentiment'],
+                    'positive_count': data['positive_count'],
+                    'negative_count': data['negative_count'],
+                    'total_articles': data['total_articles'],
+                    'signal_strength': abs(data['net_sentiment']),
                     'position_type': 'long'
                 })
         
-        # Get top negative sentiment stocks for short positions
+        # Get tickers with lowest net sentiment (most negative) for short positions
         for ticker, data in reversed(sorted_tickers):
-            if data['score'] < 0 and len(short_signals) < 5:
+            if data['net_sentiment'] < 0 and len(short_signals) < 5:
                 short_signals.append({
                     'ticker': ticker,
-                    'score': data['score'],
-                    'article_count': data['article_count'],
-                    'signal_strength': abs(data['score']),
+                    'net_sentiment': data['net_sentiment'],
+                    'positive_count': data['positive_count'],
+                    'negative_count': data['negative_count'],
+                    'total_articles': data['total_articles'],
+                    'signal_strength': abs(data['net_sentiment']),
                     'position_type': 'short'
                 })
         
@@ -181,25 +184,42 @@ class RealtimeTradingPredictor:
             'long_signals': long_signals,
             'short_signals': short_signals,
             'total_articles_analyzed': len(analyzed_articles),
-            'unique_tickers': len(ticker_scores),
-            'market_sentiment': self._calculate_market_sentiment(ticker_scores)
+            'unique_tickers': len(ticker_net_scores),
+            'market_sentiment': self._calculate_market_sentiment(ticker_net_scores)
         }
         
         if self.debug:
             logger.info("Trading Signals Generated:")
-            logger.info(f"  Long positions: {[s['ticker'] for s in long_signals]}")
-            logger.info(f"  Short positions: {[s['ticker'] for s in short_signals]}")
+            logger.info("  Long positions:")
+            for signal in long_signals:
+                logger.info(f"    {signal['ticker']}: net={signal['net_sentiment']:+d} (pos:{signal['positive_count']}, neg:{signal['negative_count']}, total:{signal['total_articles']})")
+            logger.info("  Short positions:")
+            for signal in short_signals:
+                logger.info(f"    {signal['ticker']}: net={signal['net_sentiment']:+d} (pos:{signal['positive_count']}, neg:{signal['negative_count']}, total:{signal['total_articles']})")
             logger.info(f"  Market sentiment: {signals['market_sentiment']:.2f}")
         
         return signals
     
-    def _calculate_market_sentiment(self, ticker_scores: Dict) -> float:
-        """Calculate overall market sentiment"""
-        if not ticker_scores:
+    def _calculate_market_sentiment(self, ticker_net_scores: Dict) -> float:
+        """Calculate overall market sentiment based on net sentiment scores"""
+        if not ticker_net_scores:
             return 0.0
         
-        all_scores = [data['score'] for data in ticker_scores.values()]
-        return sum(all_scores) / len(all_scores)
+        # Calculate weighted average based on total article counts
+        total_weighted_sentiment = 0
+        total_articles = 0
+        
+        for data in ticker_net_scores.values():
+            net_sentiment = data['net_sentiment']
+            article_count = data['total_articles']
+            
+            total_weighted_sentiment += net_sentiment * article_count
+            total_articles += article_count
+        
+        if total_articles == 0:
+            return 0.0
+            
+        return total_weighted_sentiment / total_articles
     
     def store_prediction(self, signals: Dict):
         """Store the prediction in the database"""
