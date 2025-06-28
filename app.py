@@ -247,6 +247,78 @@ def get_day_details(simulation_id, date):
     finally:
         session.close()
 
+@app.route('/api/simulation/<int:simulation_id>/ticker-sentiment-summary')
+def get_ticker_sentiment_summary(simulation_id):
+    """Get ticker sentiment counts for a specific simulation"""
+    session = get_db_session()
+    
+    try:
+        # Check if simulation exists
+        simulation = session.query(Simulation).filter_by(id=simulation_id).first()
+        if not simulation:
+            return jsonify({'error': 'Simulation not found'}), 404
+        
+        # Query to get ticker sentiment counts using efficient SQL aggregation
+        # This will be much faster than counting in the frontend
+        ticker_sentiment_query = session.query(
+            NewsSentiment.ticker,
+            NewsSentiment.sentiment,
+            func.count(NewsSentiment.id).label('count')
+        ).filter(
+            NewsSentiment.simulation_id == simulation_id,
+            NewsSentiment.ticker.isnot(None)  # Only include records with identified tickers
+        ).group_by(
+            NewsSentiment.ticker,
+            NewsSentiment.sentiment
+        ).order_by(
+            NewsSentiment.ticker,
+            NewsSentiment.sentiment
+        ).all()
+        
+        # Organize the results into a structured format
+        ticker_summaries = {}
+        
+        for ticker, sentiment, count in ticker_sentiment_query:
+            if ticker not in ticker_summaries:
+                ticker_summaries[ticker] = {
+                    'ticker': ticker,
+                    'positive': 0,
+                    'negative': 0,
+                    'neutral': 0,
+                    'total': 0
+                }
+            
+            ticker_summaries[ticker][sentiment] = count
+            ticker_summaries[ticker]['total'] += count
+        
+        # Convert to list and add sentiment score calculation
+        result = []
+        for ticker_data in ticker_summaries.values():
+            # Calculate a simple sentiment score: (positive - negative) / total
+            total = ticker_data['total']
+            if total > 0:
+                sentiment_score = (ticker_data['positive'] - ticker_data['negative']) / total
+            else:
+                sentiment_score = 0
+            
+            ticker_data['sentiment_score'] = round(sentiment_score, 3)
+            result.append(ticker_data)
+        
+        # Sort by total mentions (most mentioned first)
+        result.sort(key=lambda x: x['total'], reverse=True)
+        
+        return jsonify({
+            'simulation_id': simulation_id,
+            'ticker_sentiment_summary': result,
+            'total_tickers': len(result),
+            'total_sentiment_records': sum(ticker['total'] for ticker in result)
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
 @app.route('/api/simulation/<int:simulation_id>', methods=['DELETE'])
 def delete_simulation(simulation_id):
     """Delete a simulation and all its associated data"""
@@ -696,16 +768,151 @@ def get_realtime_predictions():
     finally:
         session.close()
 
+@app.route('/api/realtime/prediction/<int:prediction_id>/ticker-sentiment-summary')
+def get_realtime_ticker_sentiment_summary(prediction_id):
+    """Get efficient ticker sentiment summary for a realtime prediction"""
+    import time
+    start_time_perf = time.time()
+    
+    session = get_db_session()
+    
+    try:
+        logger.info(f"Starting efficient ticker sentiment summary for prediction {prediction_id}")
+        # Get the prediction
+        prediction = session.query(RealtimePrediction).filter_by(id=prediction_id).first()
+        if not prediction:
+            return jsonify({'error': 'Prediction not found'}), 404
+        
+        # Get the time range from prediction data (or fall back to default calculation)
+        prediction_data = prediction.prediction_data or {}
+        time_range_used = prediction_data.get('time_range_used')
+        
+        if time_range_used and time_range_used.get('start') and time_range_used.get('end'):
+            try:
+                start_val = time_range_used['start']
+                end_val = time_range_used['end']
+                
+                # Handle different types of time values
+                if isinstance(start_val, str):
+                    start_time = datetime.fromisoformat(start_val.replace('Z', '+00:00'))
+                elif isinstance(start_val, datetime):
+                    start_time = start_val
+                else:
+                    raise ValueError(f"Invalid start_time type: {type(start_val)}")
+                
+                if isinstance(end_val, str):
+                    end_time = datetime.fromisoformat(end_val.replace('Z', '+00:00'))
+                elif isinstance(end_val, datetime):
+                    end_time = end_val
+                else:
+                    raise ValueError(f"Invalid end_time type: {type(end_val)}")
+                    
+            except (ValueError, TypeError) as e:
+                # Fall back to default calculation if parsing fails
+                print(f"Warning: Could not parse time range from prediction data: {e}")
+                end_time = prediction.timestamp
+                start_time = end_time - timedelta(hours=8)
+        else:
+            # Fall back to calculating default range based on prediction timestamp
+            end_time = prediction.timestamp
+            start_time = end_time - timedelta(hours=8)
+        
+        # Query ONLY existing sentiment data from database (no new analysis)
+        # This data should have been created when the prediction was originally generated
+        # For realtime predictions, we use negative simulation_id = -prediction_id
+        logger.info(f"Querying existing sentiment data for prediction {prediction_id}")
+        simulation_id = -prediction_id  # Realtime predictions use negative simulation_id
+        
+        existing_sentiments = session.query(NewsSentiment).filter(
+            NewsSentiment.simulation_id == simulation_id,
+            NewsSentiment.ticker.isnot(None)  # Only include records with identified tickers
+        ).all()
+        
+        logger.info(f"Found {len(existing_sentiments)} existing sentiment records")
+        
+        # Aggregate existing sentiment data only
+        ticker_summaries = {}
+        
+        for sentiment_record in existing_sentiments:
+            ticker = sentiment_record.ticker
+            sentiment = sentiment_record.sentiment
+            
+            if ticker not in ticker_summaries:
+                ticker_summaries[ticker] = {
+                    'ticker': ticker,
+                    'positive': 0,
+                    'negative': 0,
+                    'neutral': 0,
+                    'total': 0
+                }
+            
+            ticker_summaries[ticker][sentiment] += 1
+            ticker_summaries[ticker]['total'] += 1
+        
+        # Get news articles count for reference (but don't analyze them)
+        news_articles_count = session.query(News).filter(
+            News.time_published >= start_time,
+            News.time_published <= end_time
+        ).count()
+        
+        # Convert to list and add sentiment score calculation
+        result = []
+        for ticker_data in ticker_summaries.values():
+            # Calculate a simple sentiment score: (positive - negative) / total
+            total = ticker_data['total']
+            if total > 0:
+                sentiment_score = (ticker_data['positive'] - ticker_data['negative']) / total
+            else:
+                sentiment_score = 0
+            
+            ticker_data['sentiment_score'] = round(sentiment_score, 3)
+            result.append(ticker_data)
+        
+        # Sort by total mentions (most mentioned first)
+        result.sort(key=lambda x: x['total'], reverse=True)
+        
+        end_time_perf = time.time()
+        processing_time = end_time_perf - start_time_perf
+        logger.info(f"Ticker sentiment summary completed in {processing_time:.2f}s for prediction {prediction_id}")
+        logger.info(f"  - Total articles in range: {news_articles_count}")
+        logger.info(f"  - Existing sentiment records: {len(existing_sentiments)}")
+        logger.info(f"  - No new analysis performed (using stored data only)")
+        logger.info(f"  - Total tickers found: {len(result)}")
+        
+        return jsonify({
+            'prediction_id': prediction_id,
+            'ticker_sentiment_summary': result,
+            'total_tickers': len(result),
+            'total_sentiment_records': sum(ticker['total'] for ticker in result),
+            'time_range': {
+                'start': start_time.isoformat(),
+                'end': end_time.isoformat()
+            },
+            'total_articles_in_range': news_articles_count,
+            'existing_sentiment_records': len(existing_sentiments),
+            'articles_analyzed_now': 0,  # No new analysis
+            'used_existing_data_only': True,
+            'performance_optimized': True,
+            'processing_time_seconds': round(processing_time, 2),
+            'data_source': 'stored_sentiment_analysis_only'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
 @app.route('/api/realtime/prediction/<int:prediction_id>')
 def get_realtime_prediction_details(prediction_id):
     """Get detailed articles and sentiment data for a specific realtime prediction with pagination"""
     session = get_db_session()
     
     try:
-        # Get pagination parameters
+        # Get pagination and filter parameters
         page = request.args.get('page', 1, type=int)
         page_size = request.args.get('page_size', 50, type=int)  # Default 50 articles per page
         max_page_size = 200  # Maximum allowed page size
+        filter_type = request.args.get('filter', 'all')  # 'all', 'analyzed', 'not-analyzed'
         
         # Validate pagination parameters
         if page < 1:
@@ -756,14 +963,14 @@ def get_realtime_prediction_details(prediction_id):
             
             logger.info(f"Recalculated time range for prediction {prediction_id}: {start_time} to {end_time}")
         
-        # Get total count of news articles from this time range (for pagination)
-        total_articles_query = session.query(News).filter(
+        # Get all articles in time range first (for proper counting and filtering)
+        all_articles_query = session.query(News).filter(
             and_(
                 News.time_published >= start_time,
                 News.time_published <= end_time
             )
         )
-        total_articles_count = total_articles_query.count()
+        total_articles_count = all_articles_query.count()
         
         # If no articles found in the calculated range, expand to include the full day
         if total_articles_count == 0:
@@ -771,83 +978,118 @@ def get_realtime_prediction_details(prediction_id):
             day_start = prediction_time.replace(hour=0, minute=0, second=0, microsecond=0)
             day_end = prediction_time.replace(hour=23, minute=59, second=59, microsecond=999999)
             
-            total_articles_query = session.query(News).filter(
+            all_articles_query = session.query(News).filter(
                 and_(
                     News.time_published >= day_start,
                     News.time_published <= day_end
                 )
             )
-            total_articles_count = total_articles_query.count()
+            total_articles_count = all_articles_query.count()
             
             # Update the time range for display
             start_time = day_start
             end_time = day_end
         
-        # Get paginated news articles
-        news_articles = total_articles_query.order_by(News.time_published.desc())\
-            .offset(offset)\
-            .limit(page_size)\
-            .all()
+        # Check if we have stored sentiment analysis for this prediction (new predictions)
+        # For realtime predictions, we use negative simulation_id = -prediction_id
+        simulation_id = -prediction_id
+        stored_sentiments = session.query(NewsSentiment).filter(
+            NewsSentiment.simulation_id == simulation_id
+        ).all()
         
-        # Calculate pagination metadata
-        total_pages = (total_articles_count + page_size - 1) // page_size  # Ceiling division
+        # Create a map of headline_id -> sentiment data for quick lookup
+        stored_sentiment_map = {}
+        for sentiment_record in stored_sentiments:
+            stored_sentiment_map[sentiment_record.headline_id] = {
+                'ticker': sentiment_record.ticker,
+                'sentiment': sentiment_record.sentiment
+            }
+        
+        has_stored_data = len(stored_sentiments) > 0
+        logger.info(f"Found {len(stored_sentiments)} stored sentiment records for prediction {prediction_id}")
+        
+        # Get all articles and determine analysis status from stored data
+        all_articles = all_articles_query.order_by(News.time_published.desc()).all()
+        analyzed_article_ids = set()
+        
+        if has_stored_data:
+            # Use stored sentiment data to determine which articles were analyzed
+            analyzed_article_ids = set(stored_sentiment_map.keys())
+        else:
+            # For old predictions without stored data, mark all as not analyzed
+            # This avoids expensive live analysis on every filter change
+            logger.info(f"No stored sentiment data found for prediction {prediction_id} - marking all articles as not analyzed")
+        
+        # Calculate total counts
+        total_analyzed_count = len(analyzed_article_ids)
+        total_not_analyzed_count = total_articles_count - total_analyzed_count
+        
+        # Apply filtering if requested
+        if filter_type == 'analyzed':
+            filtered_articles = [a for a in all_articles if a.id in analyzed_article_ids]
+        elif filter_type == 'not-analyzed':
+            filtered_articles = [a for a in all_articles if a.id not in analyzed_article_ids]
+        else:  # 'all'
+            filtered_articles = all_articles
+        
+        # Calculate pagination for filtered results
+        filtered_total_count = len(filtered_articles)
+        total_pages = (filtered_total_count + page_size - 1) // page_size  # Ceiling division
         has_next = page < total_pages
         has_prev = page > 1
         
-        # Now analyze which articles would have been used for this prediction
-        # (We'll re-run the sentiment analysis to match what was actually used)
-        from models.base_sentiment_model import BaseSentimentModel
-        sentiment_model = BaseSentimentModel(debug=False)
+        # Apply pagination to filtered results
+        start_idx = offset
+        end_idx = offset + page_size
+        news_articles = filtered_articles[start_idx:end_idx]
         
+        # Build article list using ONLY stored data - no live sentiment analysis
         analyzed_articles = []
         ticker_mentions = {}
         
         for news_item in news_articles:
-            try:
-                # Extract ticker from headline (same logic as predictor)
-                ticker = sentiment_model.extract_ticker_from_headline(news_item.title)
+            has_analysis = news_item.id in analyzed_article_ids
+            
+            if has_analysis and news_item.id in stored_sentiment_map:
+                # Use stored sentiment data
+                sentiment_data = stored_sentiment_map[news_item.id]
+                ticker = sentiment_data['ticker']
+                sentiment = sentiment_data['sentiment']
                 
+                analyzed_articles.append({
+                    'headline_id': news_item.id,
+                    'title': news_item.title,
+                    'summary': news_item.summary,
+                    'source': news_item.source,
+                    'url': news_item.url,
+                    'time_published': news_item.time_published.strftime('%Y-%m-%d %H:%M:%S'),
+                    'sentiment': sentiment,
+                    'identified_ticker': ticker,
+                    'has_analysis': True,
+                    'used_for_prediction': True,
+                    'data_source': 'stored'
+                })
+                
+                # Track ticker mentions for summary
+                if ticker and ticker not in ticker_mentions:
+                    ticker_mentions[ticker] = {'positive': 0, 'negative': 0, 'neutral': 0}
                 if ticker:
-                    # Analyze sentiment
-                    sentiment = sentiment_model.analyze_headline_sentiment(news_item.title, ticker)
-                    
-                    analyzed_articles.append({
-                        'headline_id': news_item.id,
-                        'title': news_item.title,
-                        'summary': news_item.summary,
-                        'source': news_item.source,
-                        'url': news_item.url,
-                        'time_published': news_item.time_published.strftime('%Y-%m-%d %H:%M:%S'),
-                        'sentiment': sentiment,
-                        'identified_ticker': ticker,
-                        'has_analysis': True,
-                        'used_for_prediction': True
-                    })
-                    
-                    # Track ticker mentions for summary
-                    if ticker not in ticker_mentions:
-                        ticker_mentions[ticker] = {'positive': 0, 'negative': 0, 'neutral': 0}
                     ticker_mentions[ticker][sentiment] += 1
-                else:
-                    # Include articles without ticker mentions too
-                    analyzed_articles.append({
-                        'headline_id': news_item.id,
-                        'title': news_item.title,
-                        'summary': news_item.summary,
-                        'source': news_item.source,
-                        'url': news_item.url,
-                        'time_published': news_item.time_published.strftime('%Y-%m-%d %H:%M:%S'),
-                        'sentiment': None,
-                        'identified_ticker': None,
-                        'has_analysis': False,
-                        'used_for_prediction': False
-                    })
-                    
-            except Exception as e:
-                print(f"Error analyzing article {news_item.id}: {e}")
-                continue
-        
-        sentiment_model.close()
+            else:
+                # Article without stored sentiment analysis
+                analyzed_articles.append({
+                    'headline_id': news_item.id,
+                    'title': news_item.title,
+                    'summary': news_item.summary,
+                    'source': news_item.source,
+                    'url': news_item.url,
+                    'time_published': news_item.time_published.strftime('%Y-%m-%d %H:%M:%S'),
+                    'sentiment': None,
+                    'identified_ticker': None,
+                    'has_analysis': False,
+                    'used_for_prediction': False,
+                    'data_source': 'none'
+                })
         
         result = {
             'prediction_id': prediction_id,
@@ -866,15 +1108,30 @@ def get_realtime_prediction_details(prediction_id):
                 'is_custom': bool(stored_time_range and stored_time_range.get('is_custom', False)),
                 'source': 'stored_custom_range' if stored_time_range else 'recalculated_default'
             },
-            'articles_analyzed': len([a for a in analyzed_articles if a['has_analysis']]),
+            # Total counts across all articles (not just current page)
             'total_articles': total_articles_count,
+            'total_analyzed': total_analyzed_count,
+            'total_not_analyzed': total_not_analyzed_count,
+            
+            # Data source information
+            'has_stored_sentiment_data': has_stored_data,
+            'uses_live_analysis': False,  # We never do live analysis anymore
+            'stored_sentiment_count': len(stored_sentiments),
+            
+            # Current page/filter specific data
+            'current_filter': filter_type,
             'current_page_articles': len(analyzed_articles),
+            'filtered_total_count': filtered_total_count,
+            
+            # Legacy field for backward compatibility (current page analyzed count)
+            'articles_analyzed': len([a for a in analyzed_articles if a['has_analysis']]),
+            
             'ticker_summary': ticker_mentions,
             'news_analysis': analyzed_articles,
             'pagination': {
                 'page': page,
                 'page_size': page_size,
-                'total_articles': total_articles_count,
+                'total_articles': filtered_total_count,  # Total for current filter
                 'total_pages': total_pages,
                 'has_next': has_next,
                 'has_prev': has_prev,

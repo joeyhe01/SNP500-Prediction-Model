@@ -12,7 +12,7 @@ from collections import defaultdict
 
 from realtime.news_aggregator import RealtimeNewsAggregator
 from models.base_sentiment_model import BaseSentimentModel
-from models.database import get_db_session, News, RealtimePrediction
+from models.database import get_db_session, News, RealtimePrediction, NewsSentiment
 from sqlalchemy import and_, func
 
 # Configure logging
@@ -86,7 +86,7 @@ class RealtimeTradingPredictor:
             logger.info(f"Got {len(news_articles)} articles from database (API fallback)")
         return news_articles
     
-    def analyze_news_sentiment(self, news_articles: List[Dict]) -> List[Dict]:
+    def analyze_news_sentiment(self, news_articles: List[Dict], prediction_id: int = None) -> List[Dict]:
         """Analyze sentiment for each news article and extract tickers"""
         analyzed_articles = []
         
@@ -111,6 +111,10 @@ class RealtimeTradingPredictor:
                     }
                     analyzed_articles.append(analyzed_article)
                     
+                    # Store sentiment analysis in database if prediction_id is provided
+                    if prediction_id is not None:
+                        self.store_sentiment_analysis(prediction_id, article, sentiment, ticker)
+                    
                     if self.debug:
                         logger.info(f"  {article['title'][:80]}... -> {ticker} ({sentiment})")
                         
@@ -121,6 +125,44 @@ class RealtimeTradingPredictor:
         logger.info(f"Successfully analyzed {len(analyzed_articles)} articles with ticker mentions")
         return analyzed_articles
     
+    def store_sentiment_analysis(self, prediction_id: int, article: Dict, sentiment: str, ticker: str):
+        """Store sentiment analysis result in database for realtime predictions"""
+        try:
+            # Use negative prediction_id to distinguish realtime predictions from simulations
+            # This allows us to reuse the same NewsSentiment table
+            simulation_id = -prediction_id
+            
+            # Use the article's published date
+            article_date = article['time_published'].date()
+            
+            # Check if we already have this sentiment analysis
+            existing = self.db_session.query(NewsSentiment).filter(
+                and_(
+                    NewsSentiment.simulation_id == simulation_id,
+                    NewsSentiment.headline_id == article['id'],
+                    NewsSentiment.date == article_date
+                )
+            ).first()
+            
+            if not existing:
+                news_sentiment = NewsSentiment(
+                    simulation_id=simulation_id,
+                    date=article_date,
+                    headline_id=article['id'],
+                    sentiment=sentiment,
+                    ticker=ticker,
+                    extra_data={'realtime_prediction_id': prediction_id}
+                )
+                self.db_session.add(news_sentiment)
+                self.db_session.commit()
+                
+                if self.debug:
+                    logger.info(f"Stored sentiment: {ticker} -> {sentiment} for article {article['id']}")
+                        
+        except Exception as e:
+            logger.error(f"Error storing sentiment analysis: {e}")
+            self.db_session.rollback()
+
     def generate_trading_signals(self, analyzed_articles: List[Dict]) -> Dict:
         """Generate trading signals based on sentiment analysis"""
         logger.info("Generating trading signals...")
@@ -296,10 +338,26 @@ class RealtimeTradingPredictor:
                     }
                 }
             
-            # Step 2: Analyze sentiment
-            analyzed_articles = self.analyze_news_sentiment(news_articles)
+            # Step 2: Create placeholder prediction to get prediction_id
+            placeholder_prediction = RealtimePrediction(
+                timestamp=datetime.now(),
+                prediction_data={'status': 'processing'},
+                long_tickers=[],
+                short_tickers=[],
+                market_sentiment_score=0.0
+            )
+            self.db_session.add(placeholder_prediction)
+            self.db_session.commit()
+            prediction_id = placeholder_prediction.id
+            logger.info(f"Created placeholder prediction with ID: {prediction_id}")
+            
+            # Step 3: Analyze sentiment with prediction_id for storage
+            analyzed_articles = self.analyze_news_sentiment(news_articles, prediction_id)
             if not analyzed_articles:
                 logger.warning("No articles with ticker mentions found")
+                # Clean up placeholder prediction
+                self.db_session.delete(placeholder_prediction)
+                self.db_session.commit()
                 return {
                     'success': False,
                     'message': 'No articles with ticker mentions found',
@@ -311,7 +369,7 @@ class RealtimeTradingPredictor:
                     }
                 }
             
-            # Step 3: Generate trading signals
+            # Step 4: Generate trading signals
             signals = self.generate_trading_signals(analyzed_articles)
             
             # Add time range information to signals
@@ -321,10 +379,23 @@ class RealtimeTradingPredictor:
                 'is_custom': bool(start_time and end_time)
             }
             
-            # Step 4: Store prediction
-            prediction_id = self.store_prediction(signals)
+            # Step 5: Update prediction with actual results
+            placeholder_prediction.prediction_data = {
+                'long_signals': signals['long_signals'],
+                'short_signals': signals['short_signals'],
+                'market_sentiment': signals['market_sentiment'],
+                'total_articles': signals['total_articles_analyzed'],
+                'unique_tickers': signals['unique_tickers'],
+                'time_range_used': signals.get('time_range_used')
+            }
+            placeholder_prediction.long_tickers = [s['ticker'] for s in signals['long_signals']]
+            placeholder_prediction.short_tickers = [s['ticker'] for s in signals['short_signals']]
+            placeholder_prediction.market_sentiment_score = signals['market_sentiment']
+            placeholder_prediction.timestamp = signals['timestamp']
+            self.db_session.commit()
+            logger.info(f"Updated prediction {prediction_id} with final results")
             
-            # Step 5: Prepare response
+            # Step 6: Prepare response
             result = {
                 'success': True,
                 'prediction_id': prediction_id,

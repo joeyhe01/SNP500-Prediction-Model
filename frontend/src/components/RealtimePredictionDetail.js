@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { parseTimestamp, formatTimestampWithTimezone, formatTimestamp } from '../utils/timeUtils';
@@ -13,12 +13,28 @@ const RealtimePredictionDetail = () => {
   const [filter, setFilter] = useState('all'); // 'all', 'analyzed', 'not-analyzed'
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
+  
+  // New state for efficient ticker sentiment summary
+  const [tickerSummary, setTickerSummary] = useState(null);
+  const [tickerSummaryLoading, setTickerSummaryLoading] = useState(true);
+  const [tickerSummaryError, setTickerSummaryError] = useState(null);
 
   useEffect(() => {
     loadPredictionDetails();
-  }, [predictionId, currentPage, pageSize]);
+  }, [predictionId, currentPage, pageSize, filter]); // Add filter dependency
+
+  useEffect(() => {
+    loadTickerSentimentSummary();
+  }, [predictionId]); // Only reload ticker summary when prediction ID changes
 
   const loadPredictionDetails = async () => {
+    console.log('loadPredictionDetails called with:', { 
+      predictionId, 
+      currentPage, 
+      pageSize, 
+      filter 
+    }); // Debug log
+    
     setLoading(true);
     setError(null);
     
@@ -26,15 +42,32 @@ const RealtimePredictionDetail = () => {
       const response = await axios.get(`/api/realtime/prediction/${predictionId}`, {
         params: {
           page: currentPage,
-          page_size: pageSize
+          page_size: pageSize,
+          filter: filter // Add filter parameter
         }
       });
       setData(response.data);
-      console.log('Prediction data:', response.data); // Debug log
+      console.log('Prediction data loaded successfully'); // Debug log
     } catch (err) {
+      console.error('Error loading prediction details:', err); // Debug log
       setError(`Error loading prediction details: ${err.response?.data?.error || err.message}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadTickerSentimentSummary = async () => {
+    setTickerSummaryLoading(true);
+    setTickerSummaryError(null);
+    
+    try {
+      const response = await axios.get(`/api/realtime/prediction/${predictionId}/ticker-sentiment-summary`);
+      setTickerSummary(response.data);
+      console.log('Ticker sentiment summary:', response.data); // Debug log
+    } catch (err) {
+      setTickerSummaryError(`Error loading ticker sentiment: ${err.response?.data?.error || err.message}`);
+    } finally {
+      setTickerSummaryLoading(false);
     }
   };
 
@@ -52,20 +85,8 @@ const RealtimePredictionDetail = () => {
     return 'Neutral';
   };
 
-  const getFilteredArticles = () => {
-    if (!data || !data.news_analysis) return [];
-    
-    switch (filter) {
-      case 'analyzed':
-        return data.news_analysis.filter(article => article.has_analysis);
-      case 'not-analyzed':
-        return data.news_analysis.filter(article => !article.has_analysis);
-      default:
-        return data.news_analysis;
-    }
-  };
-
-  const filteredArticles = getFilteredArticles();
+  // Articles are now filtered server-side, so we can use them directly
+  const filteredArticles = data?.news_analysis || [];
 
   const handlePageChange = (newPage) => {
     setCurrentPage(newPage);
@@ -76,6 +97,34 @@ const RealtimePredictionDetail = () => {
     setPageSize(newPageSize);
     setCurrentPage(1); // Reset to first page when changing page size
   };
+
+  // Optimized filter handlers to prevent page refresh
+  const handleFilterChange = useCallback((newFilter, event) => {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    
+    console.log('Filter changing to:', newFilter); // Debug log
+    
+    // Batch state updates
+    if (newFilter !== filter) {
+      setFilter(newFilter);
+      setCurrentPage(1);
+    }
+  }, [filter]);
+
+  const handleFilterAll = useCallback((event) => {
+    handleFilterChange('all', event);
+  }, [handleFilterChange]);
+
+  const handleFilterAnalyzed = useCallback((event) => {
+    handleFilterChange('analyzed', event);
+  }, [handleFilterChange]);
+
+  const handleFilterNotAnalyzed = useCallback((event) => {
+    handleFilterChange('not-analyzed', event);
+  }, [handleFilterChange]);
 
   if (loading) {
     return (
@@ -98,7 +147,7 @@ const RealtimePredictionDetail = () => {
         </div>
         <div className="container">
           <div className="error">{error}</div>
-          <button className="btn" onClick={() => navigate('/')}>Back to Dashboard</button>
+          <button type="button" className="btn" onClick={() => navigate('/')}>Back to Dashboard</button>
         </div>
       </div>
     );
@@ -111,7 +160,7 @@ const RealtimePredictionDetail = () => {
           <h1>🔴 Realtime Prediction Analysis</h1>
           <p>Detailed breakdown of news sentiment and trading signals</p>
         </div>
-        <button className="btn" onClick={() => navigate('/')}>
+        <button type="button" className="btn" onClick={() => navigate('/')}>
           ← Back to Dashboard
         </button>
       </div>
@@ -158,59 +207,60 @@ const RealtimePredictionDetail = () => {
             </div>
           </div>
 
-          {/* Trading Signals */}
-          <div className="signals-section">
-            <div className="signals-grid">
-              <div className="signal-column long">
-                <h3>🟢 Long Positions</h3>
-                {data.long_tickers && data.long_tickers.length > 0 ? (
-                  <div className="signal-list">
-                    {data.long_tickers.map((ticker, index) => (
-                      <div key={index} className="signal-ticker">
-                        {ticker}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="no-signals">No long signals</div>
-                )}
-              </div>
-              
-              <div className="signal-column short">
-                <h3>🔴 Short Positions</h3>
-                {data.short_tickers && data.short_tickers.length > 0 ? (
-                  <div className="signal-list">
-                    {data.short_tickers.map((ticker, index) => (
-                      <div key={index} className="signal-ticker">
-                        {ticker}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="no-signals">No short signals</div>
-                )}
-              </div>
-            </div>
-          </div>
 
-          {/* Ticker Summary */}
-          {data.ticker_summary && Object.keys(data.ticker_summary).length > 0 && (
-            <div className="ticker-summary-section">
-              <h3>Ticker Sentiment Summary (Current Database Analysis)</h3>
-              <div className="ticker-summary-grid">
-                {Object.entries(data.ticker_summary).map(([ticker, sentiments]) => (
-                  <div key={ticker} className="ticker-summary-item">
-                    <div className="ticker-name">{ticker}</div>
-                    <div className="sentiment-counts">
-                      <span className="positive-count">✅ {sentiments.positive}</span>
-                      <span className="negative-count">❌ {sentiments.negative}</span>
-                      <span className="neutral-count">⚪ {sentiments.neutral}</span>
-                    </div>
-                  </div>
-                ))}
+
+          {/* Efficient Ticker Sentiment Summary */}
+          <div className="ticker-summary-section">
+            <h3>Ticker Sentiment Summary (From Stored Prediction Data)</h3>
+            
+            {tickerSummaryLoading && (
+              <div className="ticker-summary-loading">
+                <div className="loading">Loading ticker sentiment analysis...</div>
               </div>
-            </div>
-          )}
+            )}
+            
+            {tickerSummaryError && (
+              <div className="ticker-summary-error">
+                <div className="error">{tickerSummaryError}</div>
+                <button 
+                  type="button"
+                  className="retry-btn"
+                  onClick={loadTickerSentimentSummary}
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+            
+            {!tickerSummaryLoading && !tickerSummaryError && tickerSummary && (
+              <div>
+                {tickerSummary.ticker_sentiment_summary && tickerSummary.ticker_sentiment_summary.length > 0 ? (
+                  <div className="ticker-summary-grid">
+                    {tickerSummary.ticker_sentiment_summary.map((tickerData) => (
+                      <div key={tickerData.ticker} className="ticker-summary-item">
+                        <div className="ticker-header">
+                          <div className="ticker-name">{tickerData.ticker}</div>
+                          <div className={`sentiment-score ${getSentimentClass(tickerData.sentiment_score)}`}>
+                            {tickerData.sentiment_score > 0 ? '+' : ''}{tickerData.sentiment_score}
+                          </div>
+                        </div>
+                        <div className="sentiment-counts">
+                          <span className="positive-count">✅ {tickerData.positive}</span>
+                          <span className="negative-count">❌ {tickerData.negative}</span>
+                          <span className="neutral-count">⚪ {tickerData.neutral}</span>
+                          <span className="total-count">📊 {tickerData.total}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="no-ticker-data">
+                    No ticker sentiment data found for this prediction.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           {/* Original Prediction Data */}
           {data.prediction_data && (
@@ -269,27 +319,61 @@ const RealtimePredictionDetail = () => {
         <div className="news-section">
           <h2>News Analysis</h2>
           
+          {/* Overall Summary */}
+          <div className="news-summary-stats">
+            <div className="summary-stat-item">
+              <span className="summary-stat-label">Total Articles:</span>
+              <span className="summary-stat-value">{data.total_articles}</span>
+            </div>
+            <div className="summary-stat-item">
+              <span className="summary-stat-label">Total Analyzed:</span>
+              <span className="summary-stat-value">{data.total_analyzed}</span>
+            </div>
+            <div className="summary-stat-item">
+              <span className="summary-stat-label">Total Not Analyzed:</span>
+              <span className="summary-stat-value">{data.total_not_analyzed}</span>
+            </div>
+            <div className="summary-stat-item">
+              <span className="summary-stat-label">Current Filter:</span>
+              <span className="summary-stat-value">
+                {filter === 'all' ? 'All Articles' : 
+                 filter === 'analyzed' ? 'Analyzed Only' : 'Not Analyzed Only'}
+              </span>
+            </div>
+            <div className="summary-stat-item">
+              <span className="summary-stat-label">Filtered Results:</span>
+              <span className="summary-stat-value">{data.filtered_total_count}</span>
+            </div>
+            <div className="summary-stat-item">
+              <span className="summary-stat-label">Current Page:</span>
+              <span className="summary-stat-value">{data.pagination?.page} of {data.pagination?.total_pages}</span>
+            </div>
+          </div>
+          
           {/* Pagination and filter controls */}
           <div className="news-controls">
             {/* Filter buttons */}
             <div className="filter-buttons">
               <button 
+                type="button"
                 className={`filter-btn ${filter === 'all' ? 'active' : ''}`}
-                onClick={() => setFilter('all')}
+                onClick={handleFilterAll}
               >
                 All Articles ({data.total_articles})
               </button>
               <button 
+                type="button"
                 className={`filter-btn ${filter === 'analyzed' ? 'active' : ''}`}
-                onClick={() => setFilter('analyzed')}
+                onClick={handleFilterAnalyzed}
               >
-                Analyzed ({data.articles_analyzed})
+                Analyzed ({data.total_analyzed})
               </button>
               <button 
+                type="button"
                 className={`filter-btn ${filter === 'not-analyzed' ? 'active' : ''}`}
-                onClick={() => setFilter('not-analyzed')}
+                onClick={handleFilterNotAnalyzed}
               >
-                Not Analyzed ({data.total_articles - data.articles_analyzed})
+                Not Analyzed ({data.total_not_analyzed})
               </button>
             </div>
 
@@ -318,6 +402,7 @@ const RealtimePredictionDetail = () => {
                 
                 <div className="pagination-controls">
                   <button 
+                    type="button"
                     className="pagination-btn"
                     onClick={() => handlePageChange(1)}
                     disabled={!data.pagination.has_prev}
@@ -325,6 +410,7 @@ const RealtimePredictionDetail = () => {
                     First
                   </button>
                   <button 
+                    type="button"
                     className="pagination-btn"
                     onClick={() => handlePageChange(data.pagination.prev_page)}
                     disabled={!data.pagination.has_prev}
@@ -353,6 +439,7 @@ const RealtimePredictionDetail = () => {
                       return (
                         <button
                           key={pageNum}
+                          type="button"
                           className={`page-number ${pageNum === data.pagination.page ? 'active' : ''}`}
                           onClick={() => handlePageChange(pageNum)}
                         >
@@ -363,6 +450,7 @@ const RealtimePredictionDetail = () => {
                   </div>
                   
                   <button 
+                    type="button"
                     className="pagination-btn"
                     onClick={() => handlePageChange(data.pagination.next_page)}
                     disabled={!data.pagination.has_next}
@@ -370,6 +458,7 @@ const RealtimePredictionDetail = () => {
                     Next
                   </button>
                   <button 
+                    type="button"
                     className="pagination-btn"
                     onClick={() => handlePageChange(data.pagination.total_pages)}
                     disabled={!data.pagination.has_next}
@@ -447,6 +536,7 @@ const NewsItem = ({ item }) => {
           <p>{expanded ? item.summary : `${item.summary.substring(0, 200)}...`}</p>
           {item.summary.length > 200 && (
             <button 
+              type="button"
               className="expand-btn"
               onClick={() => setExpanded(!expanded)}
             >

@@ -693,6 +693,142 @@
   color: #64748b;
 }
 
+.total-count {
+  color: #475569;
+  font-weight: 600;
+}
+
+/* New efficient ticker summary styles */
+.ticker-summary-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.summary-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  text-align: center;
+}
+
+.stat-label {
+  font-size: 0.875rem;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.stat-value {
+  font-size: 1.25rem;
+  color: #1e293b;
+  font-weight: 700;
+}
+
+.ticker-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.ticker-header .sentiment-score {
+  font-size: 0.875rem;
+  font-weight: 600;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-family: 'Monaco', 'Menlo', monospace;
+}
+
+.ticker-header .sentiment-score.positive {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.ticker-header .sentiment-score.negative {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.ticker-header .sentiment-score.neutral {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.ticker-summary-loading {
+  text-align: center;
+  padding: 2rem;
+}
+
+.ticker-summary-error {
+  text-align: center;
+  padding: 2rem;
+}
+
+.retry-btn {
+  background: #667eea;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 1rem;
+  transition: background-color 0.2s ease;
+}
+
+.retry-btn:hover {
+  background: #5b21b6;
+}
+
+.no-ticker-data {
+  text-align: center;
+  padding: 2rem;
+  color: #64748b;
+  font-style: italic;
+}
+
+/* News summary statistics */
+.news-summary-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+@media (max-width: 768px) {
+  .news-summary-stats {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 0.75rem;
+  }
+}
+
+.summary-stat-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.summary-stat-label {
+  font-size: 0.875rem;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.summary-stat-value {
+  font-size: 1rem;
+  color: #1e293b;
+  font-weight: 600;
+}
+
 .original-prediction-section {
   margin-bottom: 2rem;
   padding-top: 1.5rem;
