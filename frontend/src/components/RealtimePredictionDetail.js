@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { parseTimestamp, formatTimestampWithTimezone, formatTimestamp } from '../utils/timeUtils';
@@ -89,16 +89,38 @@ const RealtimePredictionDetail = () => {
   const filteredArticles = data?.news_analysis || [];
 
   const handlePageChange = (newPage) => {
+    // Save scroll position for page changes too
+    savedScrollPositionRef.current = window.scrollY;
+    shouldPreserveScrollRef.current = true;
+    
     setCurrentPage(newPage);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handlePageSizeChange = (newPageSize) => {
+    // Save scroll position for page size changes too
+    savedScrollPositionRef.current = window.scrollY;
+    shouldPreserveScrollRef.current = true;
+    
     setPageSize(newPageSize);
     setCurrentPage(1); // Reset to first page when changing page size
   };
 
-  // Optimized filter handlers to prevent page refresh
+  // Track if we should preserve scroll position (for filter changes, not page changes)
+  const shouldPreserveScrollRef = useRef(false);
+  const savedScrollPositionRef = useRef(0);
+
+  // Effect to restore scroll position after filter changes
+  useEffect(() => {
+    if (shouldPreserveScrollRef.current) {
+      // Restore the saved scroll position
+      requestAnimationFrame(() => {
+        window.scrollTo(0, savedScrollPositionRef.current);
+        shouldPreserveScrollRef.current = false; // Reset the flag
+      });
+    }
+  }, [data]); // Trigger when data changes (after filter is applied)
+
+  // Optimized filter handlers to prevent page refresh and unwanted scrolling
   const handleFilterChange = useCallback((newFilter, event) => {
     if (event) {
       event.preventDefault();
@@ -107,10 +129,14 @@ const RealtimePredictionDetail = () => {
     
     console.log('Filter changing to:', newFilter); // Debug log
     
-    // Batch state updates
+    // Batch state updates without scrolling
     if (newFilter !== filter) {
+      // Save current scroll position and set flag to preserve it
+      savedScrollPositionRef.current = window.scrollY;
+      shouldPreserveScrollRef.current = true;
+      
       setFilter(newFilter);
-      setCurrentPage(1);
+      setCurrentPage(1); // Reset to page 1 but preserve scroll position
     }
   }, [filter]);
 
@@ -520,11 +546,23 @@ const NewsItem = ({ item }) => {
           )}
         </div>
         <div className="news-sentiment-info">
-          <span className={`sentiment-badge ${getSentimentBadgeClass(item.sentiment)}`}>
-            {getSentimentDisplayText(item.sentiment, item.has_analysis)}
-          </span>
-          {item.identified_ticker && (
-            <span className="ticker-badge">{item.identified_ticker}</span>
+          {item.has_analysis && item.sentiment_data && item.sentiment_data.length > 0 ? (
+            <div className="sentiment-badges-container">
+              {item.sentiment_data.map((sentimentItem, index) => (
+                <div key={index} className="ticker-sentiment-pair">
+                  <span className="ticker-badge">{sentimentItem.ticker}</span>
+                  <span className={`sentiment-badge ${getSentimentBadgeClass(sentimentItem.sentiment)}`}>
+                    {sentimentItem.sentiment}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="no-sentiment-analysis">
+              <span className="sentiment-badge sentiment-no-analysis">
+                No Analysis
+              </span>
+            </div>
           )}
         </div>
       </div>

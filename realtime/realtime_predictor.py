@@ -11,7 +11,7 @@ from typing import Dict, List, Tuple
 from collections import defaultdict
 
 from realtime.news_aggregator import RealtimeNewsAggregator
-from models.base_sentiment_model import BaseSentimentModel
+from models.llm_sentiment_model import LLMSentimentModel
 from models.database import get_db_session, News, RealtimePrediction, NewsSentiment
 from sqlalchemy import and_, func
 
@@ -23,7 +23,7 @@ class RealtimeTradingPredictor:
     def __init__(self, debug=False, database_only=False):
         """Initialize the realtime predictor"""
         self.news_aggregator = RealtimeNewsAggregator()
-        self.sentiment_model = BaseSentimentModel(debug=debug)
+        self.sentiment_model = LLMSentimentModel(debug=debug)
         self.db_session = get_db_session()
         self.debug = debug
         self.database_only = database_only
@@ -87,46 +87,48 @@ class RealtimeTradingPredictor:
         return news_articles
     
     def analyze_news_sentiment(self, news_articles: List[Dict], prediction_id: int = None) -> List[Dict]:
-        """Analyze sentiment for each news article and extract tickers"""
+        """Analyze sentiment for each news article and extract tickers using LLM"""
         analyzed_articles = []
         
         logger.info(f"Analyzing sentiment for {len(news_articles)} articles...")
         
         for article in news_articles:
             try:
-                # Extract ticker from headline
-                ticker = self.sentiment_model.extract_ticker_from_headline(article['title'])
+                # Use LLM to analyze sentiment and extract multiple tickers
+                ticker_sentiments = self.sentiment_model.analyze_news_sentiment(
+                    article['title'], 
+                    article.get('summary')
+                )
                 
-                if ticker:
-                    # Analyze sentiment
-                    sentiment = self.sentiment_model.analyze_headline_sentiment(
-                        article['title'], ticker
-                    )
-                    
-                    analyzed_article = {
-                        **article,
-                        'ticker': ticker,
-                        'sentiment': sentiment,
-                        'analyzed_at': datetime.now()
-                    }
-                    analyzed_articles.append(analyzed_article)
+                if ticker_sentiments:
+                    # Create an analyzed article for each ticker/sentiment pair
+                    for ticker_sentiment in ticker_sentiments:
+                        analyzed_article = {
+                            **article,
+                            'ticker': ticker_sentiment['ticker'],
+                            'sentiment': ticker_sentiment['sentiment'],
+                            'analyzed_at': datetime.now()
+                        }
+                        analyzed_articles.append(analyzed_article)
                     
                     # Store sentiment analysis in database if prediction_id is provided
                     if prediction_id is not None:
-                        self.store_sentiment_analysis(prediction_id, article, sentiment, ticker)
+                        self.store_sentiment_analysis(prediction_id, article, ticker_sentiments)
                     
                     if self.debug:
-                        logger.info(f"  {article['title'][:80]}... -> {ticker} ({sentiment})")
+                        tickers_found = [ts['ticker'] for ts in ticker_sentiments]
+                        sentiments_found = [ts['sentiment'] for ts in ticker_sentiments]
+                        logger.info(f"  {article['title'][:80]}... -> {list(zip(tickers_found, sentiments_found))}")
                         
             except Exception as e:
                 logger.error(f"Error analyzing article: {e}")
                 continue
         
-        logger.info(f"Successfully analyzed {len(analyzed_articles)} articles with ticker mentions")
+        logger.info(f"Successfully analyzed {len(analyzed_articles)} ticker-article pairs from {len(news_articles)} articles")
         return analyzed_articles
     
-    def store_sentiment_analysis(self, prediction_id: int, article: Dict, sentiment: str, ticker: str):
-        """Store sentiment analysis result in database for realtime predictions"""
+    def store_sentiment_analysis(self, prediction_id: int, article: Dict, ticker_sentiments: List[Dict]):
+        """Store multiple sentiment analysis results in database for realtime predictions"""
         try:
             # Use negative prediction_id to distinguish realtime predictions from simulations
             # This allows us to reuse the same NewsSentiment table
@@ -135,29 +137,34 @@ class RealtimeTradingPredictor:
             # Use the article's published date
             article_date = article['time_published'].date()
             
-            # Check if we already have this sentiment analysis
-            existing = self.db_session.query(NewsSentiment).filter(
+            # Check if we already have sentiment analysis for this article in this prediction
+            existing_count = self.db_session.query(NewsSentiment).filter(
                 and_(
                     NewsSentiment.simulation_id == simulation_id,
                     NewsSentiment.headline_id == article['id'],
                     NewsSentiment.date == article_date
                 )
-            ).first()
+            ).count()
             
-            if not existing:
-                news_sentiment = NewsSentiment(
-                    simulation_id=simulation_id,
-                    date=article_date,
-                    headline_id=article['id'],
-                    sentiment=sentiment,
-                    ticker=ticker,
-                    extra_data={'realtime_prediction_id': prediction_id}
-                )
-                self.db_session.add(news_sentiment)
-                self.db_session.commit()
+            if existing_count == 0:
+                # Store each ticker/sentiment pair as a separate row
+                for ticker_sentiment in ticker_sentiments:
+                    news_sentiment = NewsSentiment(
+                        simulation_id=simulation_id,
+                        date=article_date,
+                        headline_id=article['id'],
+                        sentiment=ticker_sentiment['sentiment'],
+                        ticker=ticker_sentiment['ticker'],
+                        extra_data={'realtime_prediction_id': prediction_id, 'source': 'openai_llm'}
+                    )
+                    self.db_session.add(news_sentiment)
                 
-                if self.debug:
-                    logger.info(f"Stored sentiment: {ticker} -> {sentiment} for article {article['id']}")
+                if ticker_sentiments:
+                    self.db_session.commit()
+                    
+                    if self.debug:
+                        tickers_sentiments = [(ts['ticker'], ts['sentiment']) for ts in ticker_sentiments]
+                        logger.info(f"Stored {len(ticker_sentiments)} sentiment analyses for article {article['id']}: {tickers_sentiments}")
                         
         except Exception as e:
             logger.error(f"Error storing sentiment analysis: {e}")

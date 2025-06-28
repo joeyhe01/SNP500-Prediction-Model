@@ -194,9 +194,11 @@ def get_day_details(simulation_id, date):
             NewsSentiment.date == day_date
         ).all()
         
-        # Create a mapping of headline_id to sentiment data
+        # Create a mapping of headline_id to list of sentiment data
         for sentiment in sentiment_records:
-            sentiment_data[sentiment.headline_id] = sentiment
+            if sentiment.headline_id not in sentiment_data:
+                sentiment_data[sentiment.headline_id] = []
+            sentiment_data[sentiment.headline_id].append(sentiment)
         
         # Get daily recap for context
         daily_recap = session.query(DailyRecap).filter_by(
@@ -224,7 +226,16 @@ def get_day_details(simulation_id, date):
         
         # Add all news with sentiment analysis where available
         for news in all_news:
-            sentiment = sentiment_data.get(news.id)
+            sentiments = sentiment_data.get(news.id, [])
+            
+            # Convert sentiments to the same format as the other API
+            sentiment_data_list = []
+            for sentiment in sentiments:
+                sentiment_data_list.append({
+                    'ticker': sentiment.ticker,
+                    'sentiment': sentiment.sentiment,
+                    'extra_data': sentiment.extra_data
+                })
             
             news_item = {
                 'headline_id': news.id,
@@ -233,10 +244,8 @@ def get_day_details(simulation_id, date):
                 'source': news.source,
                 'url': news.url,
                 'time_published': news.time_published.strftime('%Y-%m-%d %H:%M:%S'),
-                'sentiment': sentiment.sentiment if sentiment else None,
-                'identified_ticker': sentiment.ticker if sentiment else None,
-                'extra_data': sentiment.extra_data if sentiment else None,
-                'has_analysis': sentiment is not None
+                'sentiment_data': sentiment_data_list,  # Array of sentiment objects
+                'has_analysis': len(sentiments) > 0
             }
             result['news_analysis'].append(news_item)
         
@@ -997,13 +1006,15 @@ def get_realtime_prediction_details(prediction_id):
             NewsSentiment.simulation_id == simulation_id
         ).all()
         
-        # Create a map of headline_id -> sentiment data for quick lookup
+        # Create a map of headline_id -> list of sentiment data for quick lookup
         stored_sentiment_map = {}
         for sentiment_record in stored_sentiments:
-            stored_sentiment_map[sentiment_record.headline_id] = {
+            if sentiment_record.headline_id not in stored_sentiment_map:
+                stored_sentiment_map[sentiment_record.headline_id] = []
+            stored_sentiment_map[sentiment_record.headline_id].append({
                 'ticker': sentiment_record.ticker,
                 'sentiment': sentiment_record.sentiment
-            }
+            })
         
         has_stored_data = len(stored_sentiments) > 0
         logger.info(f"Found {len(stored_sentiments)} stored sentiment records for prediction {prediction_id}")
@@ -1051,10 +1062,8 @@ def get_realtime_prediction_details(prediction_id):
             has_analysis = news_item.id in analyzed_article_ids
             
             if has_analysis and news_item.id in stored_sentiment_map:
-                # Use stored sentiment data
-                sentiment_data = stored_sentiment_map[news_item.id]
-                ticker = sentiment_data['ticker']
-                sentiment = sentiment_data['sentiment']
+                # Use stored sentiment data (multiple ticker/sentiment pairs)
+                sentiment_data_list = stored_sentiment_map[news_item.id]
                 
                 analyzed_articles.append({
                     'headline_id': news_item.id,
@@ -1063,18 +1072,20 @@ def get_realtime_prediction_details(prediction_id):
                     'source': news_item.source,
                     'url': news_item.url,
                     'time_published': news_item.time_published.strftime('%Y-%m-%d %H:%M:%S'),
-                    'sentiment': sentiment,
-                    'identified_ticker': ticker,
+                    'sentiment_data': sentiment_data_list,  # Array of {ticker, sentiment} objects
                     'has_analysis': True,
                     'used_for_prediction': True,
                     'data_source': 'stored'
                 })
                 
                 # Track ticker mentions for summary
-                if ticker and ticker not in ticker_mentions:
-                    ticker_mentions[ticker] = {'positive': 0, 'negative': 0, 'neutral': 0}
-                if ticker:
-                    ticker_mentions[ticker][sentiment] += 1
+                for sentiment_data in sentiment_data_list:
+                    ticker = sentiment_data['ticker']
+                    sentiment = sentiment_data['sentiment']
+                    if ticker and ticker not in ticker_mentions:
+                        ticker_mentions[ticker] = {'positive': 0, 'negative': 0, 'neutral': 0}
+                    if ticker:
+                        ticker_mentions[ticker][sentiment] += 1
             else:
                 # Article without stored sentiment analysis
                 analyzed_articles.append({
@@ -1084,8 +1095,7 @@ def get_realtime_prediction_details(prediction_id):
                     'source': news_item.source,
                     'url': news_item.url,
                     'time_published': news_item.time_published.strftime('%Y-%m-%d %H:%M:%S'),
-                    'sentiment': None,
-                    'identified_ticker': None,
+                    'sentiment_data': [],  # Empty array for consistency
                     'has_analysis': False,
                     'used_for_prediction': False,
                     'data_source': 'none'
