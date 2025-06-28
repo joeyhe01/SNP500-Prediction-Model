@@ -769,3 +769,114 @@
   color: #78350f;
   font-weight: 600;
 }
+
+/* Individual API Buttons */
+.individual-api-section {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.individual-api-section h3 {
+  margin: 0 0 1rem 0;
+  color: #1e293b;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.individual-api-buttons {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+@media (max-width: 768px) {
+  .individual-api-buttons {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .individual-api-buttons {
+    grid-template-columns: 1fr;
+  }
+}
+
+.api-btn {
+  padding: 0.75rem 1rem;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.875rem;
+  text-align: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.api-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.api-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.api-btn.loading {
+  animation: pulse 2s infinite;
+}
+
+.finnhub-btn {
+  background: linear-gradient(135deg, #4338ca, #5b21b6);
+  color: white;
+}
+
+.finnhub-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #3730a3, #4c1d95);
+}
+
+.newsapi-ai-btn {
+  background: linear-gradient(135deg, #059669, #047857);
+  color: white;
+}
+
+.newsapi-ai-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #047857, #065f46);
+}
+
+.alpha-vantage-btn {
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+  color: white;
+}
+
+.alpha-vantage-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #b91c1c, #991b1b);
+}
+
+.newsapi-org-btn {
+  background: linear-gradient(135deg, #ea580c, #dc2626);
+  color: white;
+}
+
+.newsapi-org-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #dc2626, #b91c1c);
+}
+
+.api-info {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e2e8f0;
+}
+
+.api-info .info-text {
+  color: #64748b;
+  font-size: 0.875rem;
+  margin: 0;
+}

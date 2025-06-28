@@ -171,6 +171,48 @@ const Realtime = () => {
     }
   };
 
+  const fetchFromSpecificAPI = async (apiName, endpoint) => {
+    setFetchingData(true);
+    setError(null);
+    setFetchMessage(null);
+
+    // Validate custom time range if enabled
+    if (useCustomRange && (!startTime || !endTime)) {
+      setError('Please provide both start and end times for custom range');
+      setFetchingData(false);
+      return;
+    }
+
+    if (useCustomRange && new Date(startTime) >= new Date(endTime)) {
+      setError('Start time must be before end time');
+      setFetchingData(false);
+      return;
+    }
+
+    try {
+      const requestData = useCustomRange ? {
+        start_time: new Date(startTime).toISOString(),
+        end_time: new Date(endTime).toISOString()
+      } : {};
+
+      const response = await axios.post(endpoint, requestData);
+      
+      if (response.data.success) {
+        setFetchMessage(response.data.message);
+        // Refresh data status after fetching
+        loadDataStatus();
+        // Auto-clear the message after 5 seconds
+        setTimeout(() => setFetchMessage(null), 5000);
+      } else {
+        setError(response.data.message || `Failed to fetch data from ${apiName}`);
+      }
+    } catch (err) {
+      setError(`Error fetching data from ${apiName}: ${err.response?.data?.error || err.message}`);
+    } finally {
+      setFetchingData(false);
+    }
+  };
+
   const generateNewPrediction = async () => {
     setLoading(true);
     setError(null);
@@ -271,7 +313,7 @@ const Realtime = () => {
             disabled={fetchingData || loading}
             title="Fetch latest news articles from multiple APIs and store in database"
           >
-            {fetchingData ? '⏳ Fetching Data...' : '📥 Fetch Fresh Data'}
+            {fetchingData ? '⏳ Fetching Data...' : '📥 Fetch All APIs'}
           </button>
           <button 
             className={`generate-btn ${loading ? 'loading' : ''}`}
@@ -281,6 +323,51 @@ const Realtime = () => {
           >
             {loading ? '⏳ Generating...' : '🚀 Generate Prediction'}
           </button>
+        </div>
+        
+        {/* Individual API Fetch Buttons */}
+        <div className="individual-api-section">
+          <h3>📡 Individual News API Sources</h3>
+          <div className="individual-api-buttons">
+            <button 
+              className={`api-btn finnhub-btn ${fetchingData ? 'loading' : ''}`}
+              onClick={() => fetchFromSpecificAPI('Finnhub', '/api/realtime/fetch-finnhub')}
+              disabled={fetchingData || loading}
+              title="Fetch company-specific news from Finnhub for all stock tickers"
+            >
+              {fetchingData ? '⏳' : '🏢'} Finnhub
+            </button>
+            <button 
+              className={`api-btn newsapi-ai-btn ${fetchingData ? 'loading' : ''}`}
+              onClick={() => fetchFromSpecificAPI('NewsAPI.ai', '/api/realtime/fetch-newsapi-ai')}
+              disabled={fetchingData || loading}
+              title="Fetch company-specific news from NewsAPI.ai using real company names"
+            >
+              {fetchingData ? '⏳' : '🤖'} NewsAPI.ai
+            </button>
+            <button 
+              className={`api-btn alpha-vantage-btn ${fetchingData ? 'loading' : ''}`}
+              onClick={() => fetchFromSpecificAPI('Alpha Vantage', '/api/realtime/fetch-alpha-vantage')}
+              disabled={fetchingData || loading}
+              title="Fetch ticker-specific news from Alpha Vantage News & Sentiment API"
+            >
+              {fetchingData ? '⏳' : '📈'} Alpha Vantage
+            </button>
+            <button 
+              className={`api-btn newsapi-org-btn ${fetchingData ? 'loading' : ''}`}
+              onClick={() => fetchFromSpecificAPI('NewsAPI.org', '/api/realtime/fetch-newsapi')}
+              disabled={fetchingData || loading}
+              title="Fetch financial news from NewsAPI.org"
+            >
+              {fetchingData ? '⏳' : '📰'} NewsAPI.org
+            </button>
+          </div>
+          <div className="api-info">
+            <p className="info-text">
+              ℹ️ Use individual API buttons to fetch news from specific sources only. 
+              "Fetch All APIs" combines multiple sources for comprehensive coverage.
+            </p>
+          </div>
         </div>
       </div>
 

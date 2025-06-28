@@ -349,6 +349,235 @@ def fetch_realtime_data():
             'timestamp': datetime.now().isoformat()
         }), 500
 
+# Individual news API endpoints
+@app.route('/api/realtime/fetch-finnhub', methods=['POST'])
+def fetch_finnhub_data():
+    """Fetch news data from Finnhub API only"""
+    try:
+        from realtime.news_aggregator import RealtimeNewsAggregator
+        
+        # Get custom time range from request if provided
+        data = request.get_json() or {}
+        start_time = None
+        end_time = None
+        
+        if 'start_time' in data and 'end_time' in data:
+            try:
+                start_time = datetime.fromisoformat(data['start_time'].replace('Z', '+00:00'))
+                end_time = datetime.fromisoformat(data['end_time'].replace('Z', '+00:00'))
+            except ValueError as e:
+                return jsonify({
+                    'success': False,
+                    'error': f'Invalid time format: {str(e)}. Use ISO format.',
+                    'timestamp': datetime.now().isoformat()
+                }), 400
+        
+        # Create aggregator instance
+        aggregator = RealtimeNewsAggregator()
+        
+        try:
+            # Use default time range if not provided
+            if not start_time or not end_time:
+                start_time, end_time = aggregator.get_time_range()
+            
+            news_articles = aggregator.fetch_finnhub_news_only(start_time, end_time)
+            time_range_msg = f" from {start_time} to {end_time}"
+            
+            result = {
+                'success': True,
+                'message': f'Successfully fetched and stored {news_articles} articles from Finnhub{time_range_msg}',
+                'articles_fetched': news_articles,
+                'api_source': 'finnhub',
+                'timestamp': datetime.now().isoformat(),
+                'time_range_used': {
+                    'start': start_time.isoformat(),
+                    'end': end_time.isoformat()
+                }
+            }
+            
+            return jsonify(result)
+        finally:
+            aggregator.close()
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'api_source': 'finnhub',
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/realtime/fetch-newsapi-ai', methods=['POST'])
+def fetch_newsapi_ai_data():
+    """Fetch news data from NewsAPI.ai only"""
+    try:
+        from realtime.news_aggregator import RealtimeNewsAggregator
+        
+        # Get custom time range from request if provided
+        data = request.get_json() or {}
+        start_time = None
+        end_time = None
+        
+        if 'start_time' in data and 'end_time' in data:
+            try:
+                start_time = datetime.fromisoformat(data['start_time'].replace('Z', '+00:00'))
+                end_time = datetime.fromisoformat(data['end_time'].replace('Z', '+00:00'))
+            except ValueError as e:
+                return jsonify({
+                    'success': False,
+                    'error': f'Invalid time format: {str(e)}. Use ISO format.',
+                    'timestamp': datetime.now().isoformat()
+                }), 400
+        
+        # Create aggregator instance
+        aggregator = RealtimeNewsAggregator()
+        
+        try:
+            # Use default time range if not provided
+            if not start_time or not end_time:
+                start_time, end_time = aggregator.get_time_range()
+            
+            news_articles = aggregator.fetch_newsapi_ai_news_only(start_time, end_time)
+            time_range_msg = f" from {start_time} to {end_time}"
+            
+            result = {
+                'success': True,
+                'message': f'Successfully fetched and stored {news_articles} articles from NewsAPI.ai{time_range_msg}',
+                'articles_fetched': news_articles,
+                'api_source': 'newsapi_ai',
+                'timestamp': datetime.now().isoformat(),
+                'time_range_used': {
+                    'start': start_time.isoformat(),
+                    'end': end_time.isoformat()
+                }
+            }
+            
+            return jsonify(result)
+        finally:
+            aggregator.close()
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'api_source': 'newsapi_ai',
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/realtime/fetch-alpha-vantage', methods=['POST'])
+def fetch_alpha_vantage_data():
+    """Fetch news data from Alpha Vantage API only"""
+    try:
+        from realtime.news_aggregator import RealtimeNewsAggregator
+        
+        # Get custom time range from request if provided
+        data = request.get_json() or {}
+        start_time = None
+        end_time = None
+        
+        if 'start_time' in data and 'end_time' in data:
+            try:
+                start_time = datetime.fromisoformat(data['start_time'].replace('Z', '+00:00'))
+                end_time = datetime.fromisoformat(data['end_time'].replace('Z', '+00:00'))
+            except ValueError as e:
+                return jsonify({
+                    'success': False,
+                    'error': f'Invalid time format: {str(e)}. Use ISO format.',
+                    'timestamp': datetime.now().isoformat()
+                }), 400
+        
+        # Create aggregator instance
+        aggregator = RealtimeNewsAggregator()
+        
+        try:
+            # Use default time range if not provided
+            if not start_time or not end_time:
+                start_time, end_time = aggregator.get_time_range()
+            
+            news_articles = aggregator.fetch_alpha_vantage_news_only(start_time, end_time)
+            time_range_msg = f" from {start_time} to {end_time}"
+            
+            result = {
+                'success': True,
+                'message': f'Successfully fetched and stored {news_articles} articles from Alpha Vantage{time_range_msg}',
+                'articles_fetched': news_articles,
+                'api_source': 'alpha_vantage',
+                'timestamp': datetime.now().isoformat(),
+                'time_range_used': {
+                    'start': start_time.isoformat(),
+                    'end': end_time.isoformat()
+                }
+            }
+            
+            return jsonify(result)
+        finally:
+            aggregator.close()
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'api_source': 'alpha_vantage',
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+@app.route('/api/realtime/fetch-newsapi', methods=['POST'])
+def fetch_newsapi_data():
+    """Fetch news data from NewsAPI.org only"""
+    try:
+        from realtime.news_aggregator import RealtimeNewsAggregator
+        
+        # Get custom time range from request if provided
+        data = request.get_json() or {}
+        start_time = None
+        end_time = None
+        
+        if 'start_time' in data and 'end_time' in data:
+            try:
+                start_time = datetime.fromisoformat(data['start_time'].replace('Z', '+00:00'))
+                end_time = datetime.fromisoformat(data['end_time'].replace('Z', '+00:00'))
+            except ValueError as e:
+                return jsonify({
+                    'success': False,
+                    'error': f'Invalid time format: {str(e)}. Use ISO format.',
+                    'timestamp': datetime.now().isoformat()
+                }), 400
+        
+        # Create aggregator instance
+        aggregator = RealtimeNewsAggregator()
+        
+        try:
+            # Use default time range if not provided
+            if not start_time or not end_time:
+                start_time, end_time = aggregator.get_time_range()
+            
+            news_articles = aggregator.fetch_newsapi_news_only(start_time, end_time)
+            time_range_msg = f" from {start_time} to {end_time}"
+            
+            result = {
+                'success': True,
+                'message': f'Successfully fetched and stored {news_articles} articles from NewsAPI.org{time_range_msg}',
+                'articles_fetched': news_articles,
+                'api_source': 'newsapi_org',
+                'timestamp': datetime.now().isoformat(),
+                'time_range_used': {
+                    'start': start_time.isoformat(),
+                    'end': end_time.isoformat()
+                }
+            }
+            
+            return jsonify(result)
+        finally:
+            aggregator.close()
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'api_source': 'newsapi_org',
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
 @app.route('/api/realtime/generate-prediction', methods=['POST'])
 def generate_realtime_prediction():
     """Generate a new realtime trading prediction using only database data"""
@@ -469,10 +698,25 @@ def get_realtime_predictions():
 
 @app.route('/api/realtime/prediction/<int:prediction_id>')
 def get_realtime_prediction_details(prediction_id):
-    """Get detailed articles and sentiment data for a specific realtime prediction"""
+    """Get detailed articles and sentiment data for a specific realtime prediction with pagination"""
     session = get_db_session()
     
     try:
+        # Get pagination parameters
+        page = request.args.get('page', 1, type=int)
+        page_size = request.args.get('page_size', 50, type=int)  # Default 50 articles per page
+        max_page_size = 200  # Maximum allowed page size
+        
+        # Validate pagination parameters
+        if page < 1:
+            page = 1
+        if page_size < 1:
+            page_size = 50
+        if page_size > max_page_size:
+            page_size = max_page_size
+            
+        offset = (page - 1) * page_size
+        
         # Get the prediction
         prediction = session.query(RealtimePrediction).filter_by(id=prediction_id).first()
         if not prediction:
@@ -512,30 +756,43 @@ def get_realtime_prediction_details(prediction_id):
             
             logger.info(f"Recalculated time range for prediction {prediction_id}: {start_time} to {end_time}")
         
-        # Get all news articles from this time range
-        news_articles = session.query(News).filter(
+        # Get total count of news articles from this time range (for pagination)
+        total_articles_query = session.query(News).filter(
             and_(
                 News.time_published >= start_time,
                 News.time_published <= end_time
             )
-        ).order_by(News.time_published.desc()).all()
+        )
+        total_articles_count = total_articles_query.count()
         
         # If no articles found in the calculated range, expand to include the full day
-        if not news_articles:
+        if total_articles_count == 0:
             # Expand to full day of prediction
             day_start = prediction_time.replace(hour=0, minute=0, second=0, microsecond=0)
             day_end = prediction_time.replace(hour=23, minute=59, second=59, microsecond=999999)
             
-            news_articles = session.query(News).filter(
+            total_articles_query = session.query(News).filter(
                 and_(
                     News.time_published >= day_start,
                     News.time_published <= day_end
                 )
-            ).order_by(News.time_published.desc()).all()
+            )
+            total_articles_count = total_articles_query.count()
             
             # Update the time range for display
             start_time = day_start
             end_time = day_end
+        
+        # Get paginated news articles
+        news_articles = total_articles_query.order_by(News.time_published.desc())\
+            .offset(offset)\
+            .limit(page_size)\
+            .all()
+        
+        # Calculate pagination metadata
+        total_pages = (total_articles_count + page_size - 1) // page_size  # Ceiling division
+        has_next = page < total_pages
+        has_prev = page > 1
         
         # Now analyze which articles would have been used for this prediction
         # (We'll re-run the sentiment analysis to match what was actually used)
@@ -610,9 +867,20 @@ def get_realtime_prediction_details(prediction_id):
                 'source': 'stored_custom_range' if stored_time_range else 'recalculated_default'
             },
             'articles_analyzed': len([a for a in analyzed_articles if a['has_analysis']]),
-            'total_articles': len(analyzed_articles),
+            'total_articles': total_articles_count,
+            'current_page_articles': len(analyzed_articles),
             'ticker_summary': ticker_mentions,
-            'news_analysis': analyzed_articles
+            'news_analysis': analyzed_articles,
+            'pagination': {
+                'page': page,
+                'page_size': page_size,
+                'total_articles': total_articles_count,
+                'total_pages': total_pages,
+                'has_next': has_next,
+                'has_prev': has_prev,
+                'next_page': page + 1 if has_next else None,
+                'prev_page': page - 1 if has_prev else None
+            }
         }
         
         return jsonify(result)

@@ -11,17 +11,24 @@ const RealtimePredictionDetail = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [filter, setFilter] = useState('all'); // 'all', 'analyzed', 'not-analyzed'
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
 
   useEffect(() => {
     loadPredictionDetails();
-  }, [predictionId]);
+  }, [predictionId, currentPage, pageSize]);
 
   const loadPredictionDetails = async () => {
     setLoading(true);
     setError(null);
     
     try {
-      const response = await axios.get(`/api/realtime/prediction/${predictionId}`);
+      const response = await axios.get(`/api/realtime/prediction/${predictionId}`, {
+        params: {
+          page: currentPage,
+          page_size: pageSize
+        }
+      });
       setData(response.data);
       console.log('Prediction data:', response.data); // Debug log
     } catch (err) {
@@ -59,6 +66,16 @@ const RealtimePredictionDetail = () => {
   };
 
   const filteredArticles = getFilteredArticles();
+
+  const handlePageChange = (newPage) => {
+    setCurrentPage(newPage);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handlePageSizeChange = (newPageSize) => {
+    setPageSize(newPageSize);
+    setCurrentPage(1); // Reset to first page when changing page size
+  };
 
   if (loading) {
     return (
@@ -250,28 +267,118 @@ const RealtimePredictionDetail = () => {
 
         {/* News Analysis */}
         <div className="news-section">
-          <h2>News Analysis ({data.news_analysis.length} articles)</h2>
+          <h2>News Analysis</h2>
           
-          {/* Filter buttons */}
-          <div className="filter-buttons">
-            <button 
-              className={`filter-btn ${filter === 'all' ? 'active' : ''}`}
-              onClick={() => setFilter('all')}
-            >
-              All Articles ({data.news_analysis.length})
-            </button>
-            <button 
-              className={`filter-btn ${filter === 'analyzed' ? 'active' : ''}`}
-              onClick={() => setFilter('analyzed')}
-            >
-              Analyzed ({data.articles_analyzed})
-            </button>
-            <button 
-              className={`filter-btn ${filter === 'not-analyzed' ? 'active' : ''}`}
-              onClick={() => setFilter('not-analyzed')}
-            >
-              Not Analyzed ({data.total_articles - data.articles_analyzed})
-            </button>
+          {/* Pagination and filter controls */}
+          <div className="news-controls">
+            {/* Filter buttons */}
+            <div className="filter-buttons">
+              <button 
+                className={`filter-btn ${filter === 'all' ? 'active' : ''}`}
+                onClick={() => setFilter('all')}
+              >
+                All Articles ({data.total_articles})
+              </button>
+              <button 
+                className={`filter-btn ${filter === 'analyzed' ? 'active' : ''}`}
+                onClick={() => setFilter('analyzed')}
+              >
+                Analyzed ({data.articles_analyzed})
+              </button>
+              <button 
+                className={`filter-btn ${filter === 'not-analyzed' ? 'active' : ''}`}
+                onClick={() => setFilter('not-analyzed')}
+              >
+                Not Analyzed ({data.total_articles - data.articles_analyzed})
+              </button>
+            </div>
+
+            {/* Pagination info and controls */}
+            {data.pagination && (
+              <div className="pagination-section">
+                <div className="pagination-info">
+                  <span className="page-info">
+                    Page {data.pagination.page} of {data.pagination.total_pages} 
+                    ({data.current_page_articles} of {data.pagination.total_articles} articles)
+                  </span>
+                  <div className="page-size-selector">
+                    <label htmlFor="pageSize">Articles per page:</label>
+                    <select 
+                      id="pageSize"
+                      value={pageSize} 
+                      onChange={(e) => handlePageSizeChange(parseInt(e.target.value))}
+                    >
+                      <option value={25}>25</option>
+                      <option value={50}>50</option>
+                      <option value={100}>100</option>
+                      <option value={200}>200</option>
+                    </select>
+                  </div>
+                </div>
+                
+                <div className="pagination-controls">
+                  <button 
+                    className="pagination-btn"
+                    onClick={() => handlePageChange(1)}
+                    disabled={!data.pagination.has_prev}
+                  >
+                    First
+                  </button>
+                  <button 
+                    className="pagination-btn"
+                    onClick={() => handlePageChange(data.pagination.prev_page)}
+                    disabled={!data.pagination.has_prev}
+                  >
+                    Previous
+                  </button>
+                  
+                  {/* Page numbers */}
+                  <div className="page-numbers">
+                    {Array.from({length: Math.min(5, data.pagination.total_pages)}, (_, i) => {
+                      let pageNum;
+                      if (data.pagination.total_pages <= 5) {
+                        pageNum = i + 1;
+                      } else {
+                        const current = data.pagination.page;
+                        const total = data.pagination.total_pages;
+                        if (current <= 3) {
+                          pageNum = i + 1;
+                        } else if (current >= total - 2) {
+                          pageNum = total - 4 + i;
+                        } else {
+                          pageNum = current - 2 + i;
+                        }
+                      }
+                      
+                      return (
+                        <button
+                          key={pageNum}
+                          className={`page-number ${pageNum === data.pagination.page ? 'active' : ''}`}
+                          onClick={() => handlePageChange(pageNum)}
+                        >
+                          {pageNum}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  
+                  <button 
+                    className="pagination-btn"
+                    onClick={() => handlePageChange(data.pagination.next_page)}
+                    disabled={!data.pagination.has_next}
+                  >
+                    Next
+                  </button>
+                  <button 
+                    className="pagination-btn"
+                    onClick={() => handlePageChange(data.pagination.total_pages)}
+                    disabled={!data.pagination.has_next}
+                  >
+                    Last
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="news-list">
