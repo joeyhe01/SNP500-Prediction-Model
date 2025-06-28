@@ -11,6 +11,8 @@ const RealtimePredictionDetail = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [filter, setFilter] = useState('all'); // 'all', 'analyzed', 'not-analyzed'
+  const [tickerFilter, setTickerFilter] = useState(''); // Filter by specific ticker
+  const [sentimentFilter, setSentimentFilter] = useState(''); // Filter by sentiment
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   
@@ -21,7 +23,7 @@ const RealtimePredictionDetail = () => {
 
   useEffect(() => {
     loadPredictionDetails();
-  }, [predictionId, currentPage, pageSize, filter]); // Add filter dependency
+  }, [predictionId, currentPage, pageSize, filter, tickerFilter, sentimentFilter]); // Add all filter dependencies
 
   useEffect(() => {
     loadTickerSentimentSummary();
@@ -32,19 +34,31 @@ const RealtimePredictionDetail = () => {
       predictionId, 
       currentPage, 
       pageSize, 
-      filter 
+      filter,
+      tickerFilter,
+      sentimentFilter
     }); // Debug log
     
     setLoading(true);
     setError(null);
     
     try {
+      const params = {
+        page: currentPage,
+        page_size: pageSize,
+        filter: filter
+      };
+      
+      // Only add ticker and sentiment filters if they're not empty
+      if (tickerFilter) {
+        params.ticker = tickerFilter;
+      }
+      if (sentimentFilter) {
+        params.sentiment = sentimentFilter;
+      }
+      
       const response = await axios.get(`/api/realtime/prediction/${predictionId}`, {
-        params: {
-          page: currentPage,
-          page_size: pageSize,
-          filter: filter // Add filter parameter
-        }
+        params: params
       });
       setData(response.data);
       console.log('Prediction data loaded successfully'); // Debug log
@@ -151,6 +165,44 @@ const RealtimePredictionDetail = () => {
   const handleFilterNotAnalyzed = useCallback((event) => {
     handleFilterChange('not-analyzed', event);
   }, [handleFilterChange]);
+
+  // Handlers for ticker and sentiment filters
+  const handleTickerFilterChange = useCallback((event) => {
+    const newTickerFilter = event.target.value;
+    console.log('Ticker filter changing to:', newTickerFilter); // Debug log
+    
+    // Save current scroll position and set flag to preserve it
+    savedScrollPositionRef.current = window.scrollY;
+    shouldPreserveScrollRef.current = true;
+    
+    setTickerFilter(newTickerFilter);
+    setCurrentPage(1); // Reset to page 1 but preserve scroll position
+  }, []);
+
+  const handleSentimentFilterChange = useCallback((event) => {
+    const newSentimentFilter = event.target.value;
+    console.log('Sentiment filter changing to:', newSentimentFilter); // Debug log
+    
+    // Save current scroll position and set flag to preserve it
+    savedScrollPositionRef.current = window.scrollY;
+    shouldPreserveScrollRef.current = true;
+    
+    setSentimentFilter(newSentimentFilter);
+    setCurrentPage(1); // Reset to page 1 but preserve scroll position
+  }, []);
+
+  const clearAllFilters = useCallback(() => {
+    console.log('Clearing all filters'); // Debug log
+    
+    // Save current scroll position and set flag to preserve it
+    savedScrollPositionRef.current = window.scrollY;
+    shouldPreserveScrollRef.current = true;
+    
+    setFilter('all');
+    setTickerFilter('');
+    setSentimentFilter('');
+    setCurrentPage(1);
+  }, []);
 
   if (loading) {
     return (
@@ -360,12 +412,24 @@ const RealtimePredictionDetail = () => {
               <span className="summary-stat-value">{data.total_not_analyzed}</span>
             </div>
             <div className="summary-stat-item">
-              <span className="summary-stat-label">Current Filter:</span>
+              <span className="summary-stat-label">Analysis Filter:</span>
               <span className="summary-stat-value">
                 {filter === 'all' ? 'All Articles' : 
                  filter === 'analyzed' ? 'Analyzed Only' : 'Not Analyzed Only'}
               </span>
             </div>
+            {tickerFilter && (
+              <div className="summary-stat-item">
+                <span className="summary-stat-label">Ticker Filter:</span>
+                <span className="summary-stat-value">{tickerFilter}</span>
+              </div>
+            )}
+            {sentimentFilter && (
+              <div className="summary-stat-item">
+                <span className="summary-stat-label">Sentiment Filter:</span>
+                <span className="summary-stat-value">{sentimentFilter}</span>
+              </div>
+            )}
             <div className="summary-stat-item">
               <span className="summary-stat-label">Filtered Results:</span>
               <span className="summary-stat-value">{data.filtered_total_count}</span>
@@ -378,29 +442,81 @@ const RealtimePredictionDetail = () => {
           
           {/* Pagination and filter controls */}
           <div className="news-controls">
-            {/* Filter buttons */}
-            <div className="filter-buttons">
-              <button 
-                type="button"
-                className={`filter-btn ${filter === 'all' ? 'active' : ''}`}
-                onClick={handleFilterAll}
-              >
-                All Articles ({data.total_articles})
-              </button>
-              <button 
-                type="button"
-                className={`filter-btn ${filter === 'analyzed' ? 'active' : ''}`}
-                onClick={handleFilterAnalyzed}
-              >
-                Analyzed ({data.total_analyzed})
-              </button>
-              <button 
-                type="button"
-                className={`filter-btn ${filter === 'not-analyzed' ? 'active' : ''}`}
-                onClick={handleFilterNotAnalyzed}
-              >
-                Not Analyzed ({data.total_not_analyzed})
-              </button>
+            {/* Analysis Filter buttons */}
+            <div className="filter-section">
+              <div className="filter-group">
+                <label className="filter-label">Analysis Status:</label>
+                <div className="filter-buttons">
+                  <button 
+                    type="button"
+                    className={`filter-btn ${filter === 'all' ? 'active' : ''}`}
+                    onClick={handleFilterAll}
+                  >
+                    All Articles ({data.total_articles})
+                  </button>
+                  <button 
+                    type="button"
+                    className={`filter-btn ${filter === 'analyzed' ? 'active' : ''}`}
+                    onClick={handleFilterAnalyzed}
+                  >
+                    Analyzed ({data.total_analyzed})
+                  </button>
+                  <button 
+                    type="button"
+                    className={`filter-btn ${filter === 'not-analyzed' ? 'active' : ''}`}
+                    onClick={handleFilterNotAnalyzed}
+                  >
+                    Not Analyzed ({data.total_not_analyzed})
+                  </button>
+                </div>
+              </div>
+
+              {/* Ticker and Sentiment Filter dropdowns */}
+              <div className="filter-group">
+                <label className="filter-label">Content Filters:</label>
+                <div className="dropdown-filters">
+                  <div className="filter-dropdown">
+                    <label htmlFor="tickerFilter">Ticker:</label>
+                    <select 
+                      id="tickerFilter"
+                      value={tickerFilter} 
+                      onChange={handleTickerFilterChange}
+                    >
+                      <option value="">All Tickers</option>
+                      {data.available_tickers && data.available_tickers.map(ticker => (
+                        <option key={ticker} value={ticker}>{ticker}</option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div className="filter-dropdown">
+                    <label htmlFor="sentimentFilter">Sentiment:</label>
+                    <select 
+                      id="sentimentFilter"
+                      value={sentimentFilter} 
+                      onChange={handleSentimentFilterChange}
+                    >
+                      <option value="">All Sentiments</option>
+                      {data.available_sentiments && data.available_sentiments.map(sentiment => (
+                        <option key={sentiment} value={sentiment}>
+                          {sentiment.charAt(0).toUpperCase() + sentiment.slice(1)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  {(tickerFilter || sentimentFilter) && (
+                    <button 
+                      type="button"
+                      className="clear-filters-btn"
+                      onClick={clearAllFilters}
+                      title="Clear all filters"
+                    >
+                      Clear Filters
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
 
             {/* Pagination info and controls */}

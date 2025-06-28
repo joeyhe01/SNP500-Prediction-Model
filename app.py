@@ -922,6 +922,8 @@ def get_realtime_prediction_details(prediction_id):
         page_size = request.args.get('page_size', 50, type=int)  # Default 50 articles per page
         max_page_size = 200  # Maximum allowed page size
         filter_type = request.args.get('filter', 'all')  # 'all', 'analyzed', 'not-analyzed'
+        ticker_filter = request.args.get('ticker', '')  # Filter by specific ticker
+        sentiment_filter = request.args.get('sentiment', '')  # Filter by sentiment: 'positive', 'negative', 'neutral'
         
         # Validate pagination parameters
         if page < 1:
@@ -1008,6 +1010,9 @@ def get_realtime_prediction_details(prediction_id):
         
         # Create a map of headline_id -> list of sentiment data for quick lookup
         stored_sentiment_map = {}
+        available_tickers = set()
+        available_sentiments = set()
+        
         for sentiment_record in stored_sentiments:
             if sentiment_record.headline_id not in stored_sentiment_map:
                 stored_sentiment_map[sentiment_record.headline_id] = []
@@ -1015,6 +1020,12 @@ def get_realtime_prediction_details(prediction_id):
                 'ticker': sentiment_record.ticker,
                 'sentiment': sentiment_record.sentiment
             })
+            
+            # Collect unique tickers and sentiments for filter options
+            if sentiment_record.ticker:
+                available_tickers.add(sentiment_record.ticker)
+            if sentiment_record.sentiment:
+                available_sentiments.add(sentiment_record.sentiment)
         
         has_stored_data = len(stored_sentiments) > 0
         logger.info(f"Found {len(stored_sentiments)} stored sentiment records for prediction {prediction_id}")
@@ -1042,6 +1053,27 @@ def get_realtime_prediction_details(prediction_id):
             filtered_articles = [a for a in all_articles if a.id not in analyzed_article_ids]
         else:  # 'all'
             filtered_articles = all_articles
+        
+        # Apply ticker and sentiment filters if specified
+        if ticker_filter or sentiment_filter:
+            def article_matches_ticker_sentiment_filter(article):
+                # Get sentiment data for this article
+                if article.id not in stored_sentiment_map:
+                    return False  # No sentiment data means it can't match ticker/sentiment filters
+                
+                sentiment_data_list = stored_sentiment_map[article.id]
+                
+                # Check if any sentiment record matches the filters
+                for sentiment_data in sentiment_data_list:
+                    ticker_match = not ticker_filter or sentiment_data['ticker'].upper() == ticker_filter.upper()
+                    sentiment_match = not sentiment_filter or sentiment_data['sentiment'].lower() == sentiment_filter.lower()
+                    
+                    if ticker_match and sentiment_match:
+                        return True
+                
+                return False
+            
+            filtered_articles = [a for a in filtered_articles if article_matches_ticker_sentiment_filter(a)]
         
         # Calculate pagination for filtered results
         filtered_total_count = len(filtered_articles)
@@ -1128,8 +1160,14 @@ def get_realtime_prediction_details(prediction_id):
             'uses_live_analysis': False,  # We never do live analysis anymore
             'stored_sentiment_count': len(stored_sentiments),
             
+            # Filter options
+            'available_tickers': sorted(list(available_tickers)),
+            'available_sentiments': sorted(list(available_sentiments)),
+            
             # Current page/filter specific data
             'current_filter': filter_type,
+            'current_ticker_filter': ticker_filter,
+            'current_sentiment_filter': sentiment_filter,
             'current_page_articles': len(analyzed_articles),
             'filtered_total_count': filtered_total_count,
             
