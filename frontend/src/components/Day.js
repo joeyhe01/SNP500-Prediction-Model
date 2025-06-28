@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { format, parseISO } from 'date-fns';
+import { parseTimestamp, formatTimestampWithTimezone, formatTimestamp } from '../utils/timeUtils';
 import './Day.css';
 
 const Day = () => {
@@ -197,7 +198,7 @@ const Day = () => {
                   if (a.has_analysis && !b.has_analysis) return -1;
                   if (!a.has_analysis && b.has_analysis) return 1;
                   // Within each group, sort by time (most recent first)
-                  return new Date(b.time_published) - new Date(a.time_published);
+                  return parseTimestamp(b.time_published) - parseTimestamp(a.time_published);
                 })
                 .map((item) => (
                   <NewsItem key={item.headline_id} item={item} />
@@ -236,8 +237,8 @@ const NewsItem = ({ item }) => {
       <div className="news-header">
         <div className="news-meta">
           <span className="news-source">{item.source}</span>
-          <span className="news-time">
-            {format(parseISO(item.time_published), 'h:mm a')}
+          <span className="news-time" title={formatTimestampWithTimezone(item.time_published)}>
+            {formatTimestamp(item.time_published)}
           </span>
           {!item.has_analysis && (
             <span className="analysis-status">📰 News Only</span>

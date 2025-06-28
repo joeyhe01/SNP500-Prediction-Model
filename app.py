@@ -10,7 +10,11 @@ from sqlalchemy import desc, asc, func, cast, Date, and_
 from datetime import datetime, timedelta
 import json
 import os
+import logging
 from sqlalchemy.orm import aliased
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__, static_folder='frontend/build/static', template_folder='frontend/build')
 
@@ -294,18 +298,44 @@ def fetch_realtime_data():
     try:
         from realtime.news_aggregator import RealtimeNewsAggregator
         
+        # Get custom time range from request if provided
+        data = request.get_json() or {}
+        start_time = None
+        end_time = None
+        
+        if 'start_time' in data and 'end_time' in data:
+            try:
+                start_time = datetime.fromisoformat(data['start_time'].replace('Z', '+00:00'))
+                end_time = datetime.fromisoformat(data['end_time'].replace('Z', '+00:00'))
+            except ValueError as e:
+                return jsonify({
+                    'success': False,
+                    'error': f'Invalid time format: {str(e)}. Use ISO format.',
+                    'timestamp': datetime.now().isoformat()
+                }), 400
+        
         # Create aggregator instance
         aggregator = RealtimeNewsAggregator()
         
         try:
-            # Run the news aggregation
-            news_articles = aggregator.run_realtime_aggregation()
+            # Run the news aggregation with custom time range if provided
+            if start_time and end_time:
+                news_articles = aggregator.aggregate_all_news_custom_range(start_time, end_time)
+                time_range_msg = f" (custom range: {start_time} to {end_time})"
+            else:
+                news_articles = aggregator.run_realtime_aggregation()
+                time_range_msg = " (default range)"
             
             result = {
                 'success': True,
-                'message': f'Successfully fetched and stored {len(news_articles)} articles',
-                'articles_fetched': len(news_articles),
-                'timestamp': datetime.now().isoformat()
+                'message': f'Successfully fetched and stored {news_articles} articles{time_range_msg}',
+                'articles_fetched': news_articles,
+                'timestamp': datetime.now().isoformat(),
+                'time_range_used': {
+                    'start': start_time.isoformat() if start_time else None,
+                    'end': end_time.isoformat() if end_time else None,
+                    'is_custom': bool(start_time and end_time)
+                }
             }
             
             return jsonify(result)
@@ -325,12 +355,31 @@ def generate_realtime_prediction():
     try:
         from realtime.realtime_predictor import RealtimeTradingPredictor
         
+        # Get custom time range from request if provided
+        data = request.get_json() or {}
+        start_time = None
+        end_time = None
+        
+        if 'start_time' in data and 'end_time' in data:
+            try:
+                start_time = datetime.fromisoformat(data['start_time'].replace('Z', '+00:00'))
+                end_time = datetime.fromisoformat(data['end_time'].replace('Z', '+00:00'))
+            except ValueError as e:
+                return jsonify({
+                    'success': False,
+                    'error': f'Invalid time format: {str(e)}. Use ISO format.',
+                    'timestamp': datetime.now().isoformat()
+                }), 400
+        
         # Create predictor instance with database_only mode
         predictor = RealtimeTradingPredictor(debug=False, database_only=True)
         
         try:
-            # Run the prediction pipeline (database only)
-            result = predictor.run_realtime_prediction()
+            # Run the prediction pipeline with custom time range if provided
+            if start_time and end_time:
+                result = predictor.run_realtime_prediction_custom_range(start_time, end_time)
+            else:
+                result = predictor.run_realtime_prediction()
             return jsonify(result)
         finally:
             predictor.close()
@@ -429,27 +478,39 @@ def get_realtime_prediction_details(prediction_id):
         if not prediction:
             return jsonify({'error': 'Prediction not found'}), 404
         
-        # Get the time range for this prediction using the same logic as news aggregator
-        prediction_time = prediction.timestamp
+        # Check if the prediction has stored time range information (from custom range)
+        prediction_data = prediction.prediction_data or {}
+        stored_time_range = prediction_data.get('time_range_used')
         
-        # Use the same time range logic as RealtimeNewsAggregator.get_time_range()
-        # But apply it to the prediction timestamp, not current time
-        current_time = prediction_time.time()
-        
-        # If prediction was before 9 AM, get from previous day 5PM to prediction time
-        if current_time < datetime.strptime('09:00', '%H:%M').time():
-            end_time = prediction_time
-            start_time = prediction_time.replace(hour=17, minute=0, second=0, microsecond=0) - timedelta(days=1)
+        if stored_time_range and stored_time_range.get('start') and stored_time_range.get('end'):
+            # Use the stored time range that was actually used for the prediction
+            start_time = datetime.fromisoformat(stored_time_range['start'])
+            end_time = datetime.fromisoformat(stored_time_range['end'])
+            logger.info(f"Using stored time range for prediction {prediction_id}: {start_time} to {end_time}")
         else:
-            # If prediction was after 9 AM, get from previous day 5PM to same day 9AM
-            # BUT since we're looking at historical data, we need to be more flexible
-            # Let's get from previous day 5PM to the prediction time
-            start_time = prediction_time.replace(hour=17, minute=0, second=0, microsecond=0) - timedelta(days=1)
-            end_time = prediction_time
+            # Fallback to recalculating based on prediction timestamp (original logic)
+            prediction_time = prediction.timestamp
             
-        # Skip weekends for start_time
-        while start_time.weekday() > 4:  # Saturday=5, Sunday=6
-            start_time = start_time - timedelta(days=1)
+            # Use the same time range logic as RealtimeNewsAggregator.get_time_range()
+            # But apply it to the prediction timestamp, not current time
+            current_time = prediction_time.time()
+            
+            # If prediction was before 9 AM, get from previous day 5PM to prediction time
+            if current_time < datetime.strptime('09:00', '%H:%M').time():
+                end_time = prediction_time
+                start_time = prediction_time.replace(hour=17, minute=0, second=0, microsecond=0) - timedelta(days=1)
+            else:
+                # If prediction was after 9 AM, get from previous day 5PM to same day 9AM
+                # BUT since we're looking at historical data, we need to be more flexible
+                # Let's get from previous day 5PM to the prediction time
+                start_time = prediction_time.replace(hour=17, minute=0, second=0, microsecond=0) - timedelta(days=1)
+                end_time = prediction_time
+                
+            # Skip weekends for start_time
+            while start_time.weekday() > 4:  # Saturday=5, Sunday=6
+                start_time = start_time - timedelta(days=1)
+            
+            logger.info(f"Recalculated time range for prediction {prediction_id}: {start_time} to {end_time}")
         
         # Get all news articles from this time range
         news_articles = session.query(News).filter(
@@ -539,8 +600,14 @@ def get_realtime_prediction_details(prediction_id):
             'short_tickers': prediction.short_tickers,
             'market_sentiment_score': prediction.market_sentiment_score,
             'time_range': {
-                'start': start_time.strftime('%Y-%m-%d %H:%M:%S'),
-                'end': end_time.strftime('%Y-%m-%d %H:%M:%S')
+                'start': start_time.isoformat(),
+                'end': end_time.isoformat()
+            },
+            'time_range_info': {
+                'start': start_time.isoformat(),
+                'end': end_time.isoformat(),
+                'is_custom': bool(stored_time_range and stored_time_range.get('is_custom', False)),
+                'source': 'stored_custom_range' if stored_time_range else 'recalculated_default'
             },
             'articles_analyzed': len([a for a in analyzed_articles if a['has_analysis']]),
             'total_articles': len(analyzed_articles),

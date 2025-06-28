@@ -28,7 +28,7 @@ class RealtimeTradingPredictor:
         self.debug = debug
         self.database_only = database_only
         
-    def get_realtime_news(self) -> List[Dict]:
+    def get_realtime_news(self, start_time=None, end_time=None) -> List[Dict]:
         """Get the latest news for analysis"""
         if self.database_only:
             logger.info("Fetching news from database only (no API calls)...")
@@ -39,15 +39,26 @@ class RealtimeTradingPredictor:
         if not self.database_only:
             # First, try to get fresh news from APIs
             try:
-                news_articles = self.news_aggregator.run_realtime_aggregation()
+                if start_time and end_time:
+                    news_articles = self.news_aggregator.aggregate_all_news_custom_range(start_time, end_time)
+                else:
+                    news_articles = self.news_aggregator.run_realtime_aggregation()
                 if news_articles:
-                    logger.info(f"Got {len(news_articles)} fresh articles from APIs")
-                    return news_articles
+                    logger.info(f"Got {news_articles} fresh articles from APIs")
+                    # For API mode, we need to fetch the news from database after saving
+                    # to get it in the expected format
+                    pass  # Continue to database fetch below
             except Exception as e:
                 logger.error(f"Error fetching fresh news: {e}")
         
         # Get news from database (fallback for API mode, primary for database_only mode)
-        start_time, end_time = self.news_aggregator.get_time_range()
+        if start_time and end_time:
+            logger.info(f"Using custom time range (UTC): {start_time} to {end_time}")
+            logger.info(f"Custom time range (Local): {start_time.astimezone()} to {end_time.astimezone()}")
+        else:
+            start_time, end_time = self.news_aggregator.get_time_range()
+            logger.info(f"Using default time range (UTC): {start_time} to {end_time}")
+            logger.info(f"Default time range (Local): {start_time.astimezone()} to {end_time.astimezone()}")
         
         db_news = self.db_session.query(News).filter(
             and_(
@@ -229,7 +240,8 @@ class RealtimeTradingPredictor:
                 'short_signals': signals['short_signals'],
                 'market_sentiment': signals['market_sentiment'],
                 'total_articles': signals['total_articles_analyzed'],
-                'unique_tickers': signals['unique_tickers']
+                'unique_tickers': signals['unique_tickers'],
+                'time_range_used': signals.get('time_range_used')  # Store the time range information
             }
             
             prediction = RealtimePrediction(
@@ -253,17 +265,35 @@ class RealtimeTradingPredictor:
     
     def run_realtime_prediction(self) -> Dict:
         """Main method to run the realtime prediction pipeline"""
-        logger.info("=== Starting Realtime Prediction Pipeline ===")
+        return self._run_prediction_pipeline()
+    
+    def run_realtime_prediction_custom_range(self, start_time: datetime, end_time: datetime) -> Dict:
+        """Run realtime prediction pipeline with custom time range"""
+        return self._run_prediction_pipeline(start_time, end_time)
+    
+    def _run_prediction_pipeline(self, start_time=None, end_time=None) -> Dict:
+        """Internal method to run the realtime prediction pipeline"""
+        if start_time and end_time:
+            logger.info(f"=== Starting Realtime Prediction Pipeline (Custom Range) ===")
+            logger.info(f"Custom Range (UTC): {start_time} to {end_time}")
+            logger.info(f"Custom Range (Local): {start_time.astimezone()} to {end_time.astimezone()}")
+        else:
+            logger.info("=== Starting Realtime Prediction Pipeline (Default Range) ===")
         
         try:
             # Step 1: Get latest news
-            news_articles = self.get_realtime_news()
+            news_articles = self.get_realtime_news(start_time, end_time)
             if not news_articles:
                 logger.warning("No news articles found for analysis")
                 return {
                     'success': False,
                     'message': 'No news articles found',
-                    'timestamp': datetime.now()
+                    'timestamp': datetime.now(),
+                    'time_range_used': {
+                        'start': start_time.isoformat() if start_time else None,
+                        'end': end_time.isoformat() if end_time else None,
+                        'is_custom': bool(start_time and end_time)
+                    }
                 }
             
             # Step 2: Analyze sentiment
@@ -273,11 +303,23 @@ class RealtimeTradingPredictor:
                 return {
                     'success': False,
                     'message': 'No articles with ticker mentions found',
-                    'timestamp': datetime.now()
+                    'timestamp': datetime.now(),
+                    'time_range_used': {
+                        'start': start_time.isoformat() if start_time else None,
+                        'end': end_time.isoformat() if end_time else None,
+                        'is_custom': bool(start_time and end_time)
+                    }
                 }
             
             # Step 3: Generate trading signals
             signals = self.generate_trading_signals(analyzed_articles)
+            
+            # Add time range information to signals
+            signals['time_range_used'] = {
+                'start': start_time.isoformat() if start_time else None,
+                'end': end_time.isoformat() if end_time else None,
+                'is_custom': bool(start_time and end_time)
+            }
             
             # Step 4: Store prediction
             prediction_id = self.store_prediction(signals)
@@ -288,7 +330,8 @@ class RealtimeTradingPredictor:
                 'prediction_id': prediction_id,
                 'signals': signals,
                 'analyzed_articles': len(analyzed_articles),
-                'timestamp': signals['timestamp']
+                'timestamp': signals['timestamp'],
+                'time_range_used': signals['time_range_used']
             }
             
             logger.info("=== Realtime Prediction Pipeline Completed Successfully ===")
@@ -299,7 +342,12 @@ class RealtimeTradingPredictor:
             return {
                 'success': False,
                 'error': str(e),
-                'timestamp': datetime.now()
+                'timestamp': datetime.now(),
+                'time_range_used': {
+                    'start': start_time.isoformat() if start_time else None,
+                    'end': end_time.isoformat() if end_time else None,
+                    'is_custom': bool(start_time and end_time)
+                }
             }
     
     def get_latest_prediction(self) -> Dict:

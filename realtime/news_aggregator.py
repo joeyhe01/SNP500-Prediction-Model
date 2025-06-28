@@ -10,6 +10,7 @@ import time
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 import logging
+import pytz
 from newsapi import NewsApiClient
 import finnhub
 from polygon import RESTClient
@@ -203,11 +204,15 @@ class RealtimeNewsAggregator:
                     if news:  # Check if news is not None or empty
                         for article in news:
                             try:
-                                # Convert Unix timestamp to datetime
-                                published = datetime.fromtimestamp(article['datetime'])
+                                # Convert Unix timestamp to timezone-aware UTC datetime
+                                published = datetime.fromtimestamp(article['datetime'], tz=pytz.UTC)
+                                
+                                # Ensure we have timezone-aware times for comparison (without modifying originals)
+                                start_compare = start_time.replace(tzinfo=pytz.UTC) if start_time.tzinfo is None else start_time
+                                end_compare = end_time.replace(tzinfo=pytz.UTC) if end_time.tzinfo is None else end_time
                                 
                                 # Check if article is within our time range
-                                if start_time <= published <= end_time:
+                                if start_compare <= published <= end_compare:
                                     # Save directly to database
                                     try:
                                         news_item = News(
@@ -232,8 +237,8 @@ class RealtimeNewsAggregator:
                     total_saved += ticker_saved
                     logger.info(f"  Saved {ticker_saved} new articles for {ticker}")
                     
-                    # Rate limiting - Finnhub allows 30 calls/second
-                    time.sleep(0.1)
+                    # Rate limiting - Finnhub allows 60 calls/minuite
+                    time.sleep(1)
                     
                 except Exception as e:
                     logger.error(f"Error fetching news for {ticker}: {e}")
@@ -328,9 +333,17 @@ class RealtimeNewsAggregator:
     def aggregate_all_news(self) -> int:
         """Fetch and save news directly to database, prioritizing Finnhub company news"""
         start_time, end_time = self.get_time_range()
+        return self._aggregate_news_for_range(start_time, end_time)
+    
+    def aggregate_all_news_custom_range(self, start_time: datetime, end_time: datetime) -> int:
+        """Fetch and save news directly to database for a custom time range"""
+        return self._aggregate_news_for_range(start_time, end_time)
+    
+    def _aggregate_news_for_range(self, start_time: datetime, end_time: datetime) -> int:
+        """Private method to fetch and save news for a specific time range"""
         total_saved = 0
         
-        logger.info("Starting news aggregation with focus on Finnhub company news...")
+        logger.info(f"Starting news aggregation for range: {start_time} to {end_time}")
         
         # Prioritize Finnhub company news as the main source for ticker-specific news
         try:

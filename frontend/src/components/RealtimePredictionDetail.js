@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { format, parseISO } from 'date-fns';
+import { parseTimestamp, formatTimestampWithTimezone, formatTimestamp } from '../utils/timeUtils';
 import './Day.css';
 
 const RealtimePredictionDetail = () => {
@@ -111,13 +111,19 @@ const RealtimePredictionDetail = () => {
             <div className="summary-item">
               <span className="summary-label">Generated:</span>
               <span className="summary-value">
-                {format(parseISO(data.timestamp), 'MMM dd, yyyy h:mm a')}
+                {formatTimestampWithTimezone(data.timestamp)}
               </span>
             </div>
             <div className="summary-item">
               <span className="summary-label">News Time Range:</span>
               <span className="summary-value">
-                {format(parseISO(data.time_range.start), 'MMM dd h:mm a')} - {format(parseISO(data.time_range.end), 'MMM dd h:mm a')}
+                {formatTimestamp(data.time_range.start)} - {formatTimestamp(data.time_range.end)}
+                {data.time_range_info && data.time_range_info.is_custom && (
+                  <span className="range-type-indicator"> (Custom Range)</span>
+                )}
+                {data.time_range_info && !data.time_range_info.is_custom && (
+                  <span className="range-type-indicator"> (Default Range)</span>
+                )}
               </span>
             </div>
             <div className="summary-item">
@@ -307,8 +313,8 @@ const NewsItem = ({ item }) => {
       <div className="news-header">
         <div className="news-meta">
           <span className="news-source">{item.source}</span>
-          <span className="news-time">
-            {format(parseISO(item.time_published), 'h:mm a')}
+          <span className="news-time" title={formatTimestampWithTimezone(item.time_published)}>
+            {formatTimestamp(item.time_published)}
           </span>
           {!item.has_analysis && (
             <span className="analysis-status">📰 News Only</span>

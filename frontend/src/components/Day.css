@@ -207,6 +207,21 @@
 .news-time {
   font-size: 0.875rem;
   color: #64748b;
+  cursor: help;
+  border-bottom: 1px dotted #94a3b8;
+  transition: color 0.2s ease;
+}
+
+.news-time:hover {
+  color: #475569;
+}
+
+.range-type-indicator {
+  font-size: 0.75rem;
+  color: #64748b;
+  font-style: italic;
+  font-weight: normal;
+  margin-left: 0.5rem;
 }
 
 .analysis-status {

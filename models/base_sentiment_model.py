@@ -10,16 +10,74 @@ from sqlalchemy import and_, or_
 class BaseSentimentModel:
     def __init__(self, debug=False):
         print("Loading sentiment analysis model...")
-        # Use a simpler sentiment analysis pipeline that doesn't require sentencepiece
-        self.sentiment_analyzer = pipeline(
-            "sentiment-analysis", 
-            model="ProsusAI/finbert",
-            device=0 if torch.cuda.is_available() else -1
-        )
-        print(f"Model loaded successfully")
-        self.session = get_db_session()
         self.debug = debug
+        self.session = get_db_session()
         
+        try:
+            # Force CPU usage to avoid meta tensor issues with GPU
+            print("Initializing sentiment analyzer on CPU...")
+            self.sentiment_analyzer = pipeline(
+                "sentiment-analysis", 
+                model="ProsusAI/finbert",
+                device=-1,  # Force CPU
+                return_all_scores=False,
+                top_k=1
+            )
+            print("Model loaded successfully on CPU")
+        except Exception as e:
+            print(f"Error loading FinBERT model: {e}")
+            print("Falling back to default sentiment model...")
+            try:
+                # Fallback to a more reliable model
+                self.sentiment_analyzer = pipeline(
+                    "sentiment-analysis",
+                    model="cardiffnlp/twitter-roberta-base-sentiment-latest",
+                    device=-1,  # Force CPU
+                    return_all_scores=False,
+                    top_k=1
+                )
+                print("Fallback model loaded successfully")
+            except Exception as e2:
+                print(f"Error loading fallback model: {e2}")
+                print("Using basic sentiment analyzer...")
+                # Last resort: use a very simple model
+                self.sentiment_analyzer = pipeline(
+                    "sentiment-analysis",
+                    device=-1,  # Force CPU
+                    return_all_scores=False,
+                    top_k=1
+                )
+                print("Basic model loaded successfully")
+        
+        # Test the model to ensure it's working
+        self._test_sentiment_analyzer()
+        
+    def _test_sentiment_analyzer(self):
+        """Test the sentiment analyzer to ensure it's working properly"""
+        try:
+            test_texts = [
+                "Apple stock rises on strong quarterly earnings",
+                "Tesla faces challenges with declining sales",
+                "Microsoft announces new cloud services"
+            ]
+            
+            print("Testing sentiment analyzer...")
+            for text in test_texts:
+                try:
+                    result = self.sentiment_analyzer(text)
+                    print(f"Raw result type: {type(result)}, value: {result}")
+                    if self.debug:
+                        print(f"Test: '{text[:30]}...' -> {result}")
+                except Exception as e:
+                    print(f"Test failed for '{text[:30]}...': {e}")
+                    raise e
+            
+            print("Sentiment analyzer test completed successfully")
+            
+        except Exception as e:
+            print(f"Sentiment analyzer test failed: {e}")
+            print("WARNING: The sentiment analyzer may not work properly!")
+
     def analyze_headline_sentiment(self, headline, ticker=None):
         """
         Analyze the sentiment of a headline for a specific ticker
@@ -32,19 +90,91 @@ class BaseSentimentModel:
             sentiment: 'positive', 'negative', or 'neutral'
         """
         try:
-            # Use the pipeline for sentiment analysis
-            result = self.sentiment_analyzer(headline[:512])[0]  # Truncate to 512 chars
-            
-            # FinBERT returns labels like 'positive', 'negative', 'neutral'
-            label = result['label'].lower()
-            
-            # Ensure we return a valid sentiment
-            if label not in ['positive', 'negative', 'neutral']:
+            # Input validation
+            if not headline or not isinstance(headline, str):
+                if self.debug:
+                    print(f"Invalid headline input: {headline}")
                 return 'neutral'
+            
+            # Clean and truncate the headline
+            clean_headline = headline.strip()
+            if len(clean_headline) == 0:
+                return 'neutral'
+            
+            # Truncate to avoid model limits
+            clean_headline = clean_headline[:512]
+            
+            # Use the pipeline for sentiment analysis with error handling
+            try:
+                result = self.sentiment_analyzer(clean_headline)
                 
-            return label
+                # Debug: log the raw result format
+                if self.debug:
+                    print(f"Raw sentiment result type: {type(result)}, value: {result}")
+                
+                # Handle different result formats more robustly
+                if isinstance(result, list):
+                    if len(result) == 0:
+                        if self.debug:
+                            print("Empty result list from sentiment analyzer")
+                        return 'neutral'
+                    
+                    # Take the first result and validate it
+                    result = result[0]
+                    
+                    # Check if the first result is still a list (nested lists)
+                    if isinstance(result, list):
+                        if len(result) > 0:
+                            result = result[0]
+                        else:
+                            if self.debug:
+                                print("Nested empty list in sentiment result")
+                            return 'neutral'
+                
+                # Ensure we have a dictionary at this point
+                if not isinstance(result, dict):
+                    if self.debug:
+                        print(f"Unexpected result format after processing: {type(result)}, value: {result}")
+                    return 'neutral'
+                
+                # Extract label safely
+                label = result.get('label', '').lower()
+                
+                # Map different label formats to standard ones
+                if label in ['positive', 'pos', 'label_2']:
+                    return 'positive'
+                elif label in ['negative', 'neg', 'label_0']:
+                    return 'negative'
+                elif label in ['neutral', 'neu', 'label_1']:
+                    return 'neutral'
+                else:
+                    # For unknown labels, try to parse from score
+                    score = result.get('score', 0)
+                    if isinstance(score, (int, float)):
+                        if score > 0.6:
+                            return 'positive' if 'positive' in label or 'pos' in label else 'negative'
+                        elif score < 0.4:
+                            return 'neutral'
+                        else:
+                            return 'neutral'
+                    else:
+                        if self.debug:
+                            print(f"Unknown label format: {label}, defaulting to neutral")
+                        return 'neutral'
+                        
+            except RuntimeError as e:
+                if "meta tensor" in str(e).lower():
+                    print(f"Meta tensor error in sentiment analysis: {e}")
+                    print("This suggests a model loading issue. Returning neutral.")
+                    return 'neutral'
+                else:
+                    raise e
+                    
         except Exception as e:
-            print(f"Error analyzing sentiment: {e}")
+            if self.debug:
+                print(f"Error analyzing sentiment for '{headline[:50]}...': {e}")
+            else:
+                print(f"Error analyzing sentiment: {e}")
             return 'neutral'
     
     def extract_ticker_from_headline(self, headline):

@@ -5,6 +5,7 @@ requests>=2.31.0
 transformers>=4.30.2
 torch>=2.0.1
 python-dateutil>=2.8.2
+pytz>=2023.3
 sentencepiece>=0.1.95
 Flask==2.3.2
 # New dependencies for realtime news APIs
