@@ -6,9 +6,12 @@ Uses aggregated news and sentiment analysis to generate real-time trading predic
 
 import json
 import logging
+import threading
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from realtime.news_aggregator import RealtimeNewsAggregator
 from models.llm_sentiment_model import LLMSentimentModel
@@ -20,13 +23,15 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class RealtimeTradingPredictor:
-    def __init__(self, debug=False, database_only=False):
+    def __init__(self, debug=False, database_only=False, max_workers=10):
         """Initialize the realtime predictor"""
         self.news_aggregator = RealtimeNewsAggregator()
         self.sentiment_model = LLMSentimentModel(debug=debug)
         self.db_session = get_db_session()
         self.debug = debug
         self.database_only = database_only
+        self.max_workers = max_workers
+        self.analysis_lock = threading.Lock()  # For thread-safe database operations
         
     def get_realtime_news(self, start_time=None, end_time=None) -> List[Dict]:
         """Get the latest news for analysis"""
@@ -86,45 +91,83 @@ class RealtimeTradingPredictor:
             logger.info(f"Got {len(news_articles)} articles from database (API fallback)")
         return news_articles
     
+    def _analyze_single_article(self, article: Dict, prediction_id: int = None) -> List[Dict]:
+        """Analyze sentiment for a single article (thread worker function)"""
+        try:
+            # Use LLM to analyze sentiment and extract multiple tickers
+            ticker_sentiments = self.sentiment_model.analyze_news_sentiment(
+                article['title'], 
+                article.get('summary')
+            )
+            
+            analyzed_articles = []
+            if ticker_sentiments:
+                # Create an analyzed article for each ticker/sentiment pair
+                for ticker_sentiment in ticker_sentiments:
+                    analyzed_article = {
+                        **article,
+                        'ticker': ticker_sentiment['ticker'],
+                        'sentiment': ticker_sentiment['sentiment'],
+                        'analyzed_at': datetime.now()
+                    }
+                    analyzed_articles.append(analyzed_article)
+                
+                # Store sentiment analysis in database if prediction_id is provided
+                # Use lock to ensure thread-safe database operations
+                if prediction_id is not None:
+                    with self.analysis_lock:
+                        self.store_sentiment_analysis(prediction_id, article, ticker_sentiments)
+                
+                if self.debug:
+                    tickers_found = [ts['ticker'] for ts in ticker_sentiments]
+                    sentiments_found = [ts['sentiment'] for ts in ticker_sentiments]
+                    logger.info(f"  {article['title'][:80]}... -> {list(zip(tickers_found, sentiments_found))}")
+            
+            return analyzed_articles
+            
+        except Exception as e:
+            logger.error(f"Error analyzing article '{article.get('title', 'Unknown')[:50]}...': {e}")
+            return []
+    
     def analyze_news_sentiment(self, news_articles: List[Dict], prediction_id: int = None) -> List[Dict]:
-        """Analyze sentiment for each news article and extract tickers using LLM"""
+        """Analyze sentiment for each news article and extract tickers using LLM with multi-threading"""
         analyzed_articles = []
         
-        logger.info(f"Analyzing sentiment for {len(news_articles)} articles...")
+        logger.info(f"Analyzing sentiment for {len(news_articles)} articles using {self.max_workers} threads...")
         
-        for article in news_articles:
-            try:
-                # Use LLM to analyze sentiment and extract multiple tickers
-                ticker_sentiments = self.sentiment_model.analyze_news_sentiment(
-                    article['title'], 
-                    article.get('summary')
-                )
-                
-                if ticker_sentiments:
-                    # Create an analyzed article for each ticker/sentiment pair
-                    for ticker_sentiment in ticker_sentiments:
-                        analyzed_article = {
-                            **article,
-                            'ticker': ticker_sentiment['ticker'],
-                            'sentiment': ticker_sentiment['sentiment'],
-                            'analyzed_at': datetime.now()
-                        }
-                        analyzed_articles.append(analyzed_article)
+        start_time = time.time()
+        
+        # Use ThreadPoolExecutor to process articles in parallel
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            # Submit all articles for processing
+            future_to_article = {
+                executor.submit(self._analyze_single_article, article, prediction_id): article 
+                for article in news_articles
+            }
+            
+            # Collect results as they complete
+            completed_count = 0
+            for future in as_completed(future_to_article):
+                try:
+                    article_results = future.result()
+                    analyzed_articles.extend(article_results)
+                    completed_count += 1
                     
-                    # Store sentiment analysis in database if prediction_id is provided
-                    if prediction_id is not None:
-                        self.store_sentiment_analysis(prediction_id, article, ticker_sentiments)
-                    
-                    if self.debug:
-                        tickers_found = [ts['ticker'] for ts in ticker_sentiments]
-                        sentiments_found = [ts['sentiment'] for ts in ticker_sentiments]
-                        logger.info(f"  {article['title'][:80]}... -> {list(zip(tickers_found, sentiments_found))}")
+                    # Log progress every 10 articles or for the last few
+                    if completed_count % 10 == 0 or completed_count > len(news_articles) - 5:
+                        logger.info(f"Progress: {completed_count}/{len(news_articles)} articles processed")
                         
-            except Exception as e:
-                logger.error(f"Error analyzing article: {e}")
-                continue
+                except Exception as e:
+                    article = future_to_article[future]
+                    logger.error(f"Error processing article '{article.get('title', 'Unknown')[:50]}...': {e}")
+        
+        end_time = time.time()
+        processing_time = end_time - start_time
         
         logger.info(f"Successfully analyzed {len(analyzed_articles)} ticker-article pairs from {len(news_articles)} articles")
+        logger.info(f"Processing time: {processing_time:.2f} seconds ({processing_time/len(news_articles):.2f}s per article)")
+        logger.info(f"Effective rate: {len(news_articles) * 60 / processing_time:.1f} articles per minute")
+        
         return analyzed_articles
     
     def store_sentiment_analysis(self, prediction_id: int, article: Dict, ticker_sentiments: List[Dict]):
@@ -458,9 +501,13 @@ class RealtimeTradingPredictor:
         self.db_session.close()
 
 if __name__ == "__main__":
-    # Test the realtime predictor
-    predictor = RealtimeTradingPredictor(debug=True)
+    # Test the realtime predictor with multi-threading
+    predictor = RealtimeTradingPredictor(
+        debug=True, 
+        max_workers=8  # Adjust based on your needs
+    )
     try:
+        logger.info("Starting realtime prediction with multi-threading...")
         result = predictor.run_realtime_prediction()
         print(json.dumps(result, indent=2, default=str))
     finally:

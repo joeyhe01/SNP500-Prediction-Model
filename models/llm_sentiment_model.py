@@ -1,9 +1,11 @@
 import os
 import json
+import time
 from typing import List, Dict, Tuple
 from datetime import datetime, timedelta
 from collections import defaultdict
 from openai import OpenAI
+import openai
 from models.database import get_db_session, News, NewsSentiment
 from sqlalchemy import and_, or_
 import logging
@@ -86,16 +88,62 @@ Example response format:
   {{"ticker": "GOOGL", "sentiment": "negative"}}
 ]"""
 
-            # Call OpenAI API
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",  # Use the more cost-effective model
-                messages=[
-                    {"role": "system", "content": "You are a financial analyst expert at identifying how news affects publicly traded companies. You respond only with valid JSON."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.1,  # Low temperature for more consistent results
-                max_tokens=500
-            )
+            # Call OpenAI API with retry logic
+            max_retries = 5
+            retry_count = 0
+            response = None
+            
+            while retry_count <= max_retries:
+                try:
+                    response = self.client.chat.completions.create(
+                        model="gpt-4o-mini",  # Use the more cost-effective model
+                        messages=[
+                            {"role": "system", "content": "You are a financial analyst expert at identifying how news affects publicly traded companies. You respond only with valid JSON."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=0.1,  # Low temperature for more consistent results
+                        max_tokens=500
+                    )
+                    break  # Success, exit retry loop
+                    
+                except openai.RateLimitError as e:
+                    retry_count += 1
+                    if retry_count <= max_retries:
+                        if self.debug:
+                            print(f"Rate limit error, retry {retry_count}/{max_retries} after 10 seconds: {e}")
+                        else:
+                            logger.warning(f"Rate limit error, retry {retry_count}/{max_retries} after 10 seconds")
+                        time.sleep(10)
+                        continue
+                    else:
+                        if self.debug:
+                            print(f"Rate limit error - max retries exceeded: {e}")
+                        else:
+                            logger.error(f"Rate limit error - max retries exceeded: {e}")
+                        return []
+                        
+                except (openai.APIError, openai.InternalServerError, openai.APIConnectionError) as e:
+                    retry_count += 1
+                    if retry_count <= max_retries:
+                        if self.debug:
+                            print(f"OpenAI API error, retry {retry_count}/{max_retries} after 10 seconds: {e}")
+                        else:
+                            logger.warning(f"OpenAI API error, retry {retry_count}/{max_retries} after 10 seconds")
+                        time.sleep(10)
+                        continue
+                    else:
+                        if self.debug:
+                            print(f"OpenAI API error - max retries exceeded: {e}")
+                        else:
+                            logger.error(f"OpenAI API error - max retries exceeded: {e}")
+                        return []
+            
+            if response is None:
+                if self.debug:
+                    print("Failed to get response from OpenAI after retries")
+                else:
+                    logger.error("Failed to get response from OpenAI after retries")
+                return []
             
             # Parse the response
             response_text = response.choices[0].message.content.strip()
