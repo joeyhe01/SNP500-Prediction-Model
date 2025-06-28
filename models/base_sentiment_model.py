@@ -49,35 +49,8 @@ class BaseSentimentModel:
                 )
                 print("Basic model loaded successfully")
         
-        # Test the model to ensure it's working
-        self._test_sentiment_analyzer()
+     
         
-    def _test_sentiment_analyzer(self):
-        """Test the sentiment analyzer to ensure it's working properly"""
-        try:
-            test_texts = [
-                "Apple stock rises on strong quarterly earnings",
-                "Tesla faces challenges with declining sales",
-                "Microsoft announces new cloud services"
-            ]
-            
-            print("Testing sentiment analyzer...")
-            for text in test_texts:
-                try:
-                    result = self.sentiment_analyzer(text)
-                    print(f"Raw result type: {type(result)}, value: {result}")
-                    if self.debug:
-                        print(f"Test: '{text[:30]}...' -> {result}")
-                except Exception as e:
-                    print(f"Test failed for '{text[:30]}...': {e}")
-                    raise e
-            
-            print("Sentiment analyzer test completed successfully")
-            
-        except Exception as e:
-            print(f"Sentiment analyzer test failed: {e}")
-            print("WARNING: The sentiment analyzer may not work properly!")
-
     def analyze_headline_sentiment(self, headline, ticker=None):
         """
         Analyze the sentiment of a headline for a specific ticker
