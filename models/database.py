@@ -112,30 +112,36 @@ class RealtimePrediction(Base):
         return f"<RealtimePrediction(id={self.id}, timestamp='{self.timestamp}', market_sentiment={self.market_sentiment_score})>"
 
 
-# Database setup
-def get_db_session():
-    """Create and return a database session"""
-    # Use PostgreSQL connection from environment variables
+_engine = None
+_Session = None
+_db_initialized = False
+
+def get_engine():
     db_user = os.getenv('POSTGRES_USER', 'postgres')
     db_password = os.getenv('POSTGRES_PASSWORD', 'postgres')
     db_host = os.getenv('POSTGRES_HOST', 'localhost')
     db_port = os.getenv('POSTGRES_PORT', '5432')
     db_name = os.getenv('POSTGRES_DB', 'trading_data')
     db_url = f'postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}'
-    engine = create_engine(db_url)
-    Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine)
-    return Session()
-
+    return create_engine(db_url)
 
 def init_database():
-    """Initialize the database (create tables if they do not exist)"""
-    db_user = os.getenv('POSTGRES_USER', 'postgres')
-    db_password = os.getenv('POSTGRES_PASSWORD', 'postgres')
-    db_host = os.getenv('POSTGRES_HOST', 'localhost')
-    db_port = os.getenv('POSTGRES_PORT', '5432')
-    db_name = os.getenv('POSTGRES_DB', 'trading_data')
-    db_url = f'postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}'
-    engine = create_engine(db_url)
-    Base.metadata.create_all(engine)  # Idempotent: only creates tables if they do not exist
-    print("Database initialized successfully")
+    """Initialize the database (create tables, keys, and indices if they do not exist)"""
+    global _db_initialized, _engine
+    if not _db_initialized:
+        if _engine is None:
+            _engine = get_engine()
+        Base.metadata.create_all(_engine)  # Idempotent
+        _db_initialized = True
+        print("Database initialized successfully")
+
+def get_db_session():
+    """Create and return a database session. Initializes DB schema only once per process."""
+    global _engine, _Session
+    if _engine is None:
+        _engine = get_engine()
+    if _Session is None:
+        _Session = sessionmaker(bind=_engine)
+    # Ensure DB is initialized only once
+    init_database()
+    return _Session()
