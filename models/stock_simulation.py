@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from models.base_sentiment_model import BaseSentimentModel
-from models.database import get_db_session, Simulation, DailyRecap, NewsSentiment
+from models.database import get_db_session, init_database, Simulation, DailyRecap, NewsSentiment
 from data_fetchers.stock_price_fetcher import StockPriceFetcher
 from sqlalchemy import and_
 from sqlalchemy.orm.attributes import flag_modified
@@ -23,6 +23,7 @@ class StockSimulation:
         else:
             self.model = model_class()
         self.price_fetcher = StockPriceFetcher()
+        # init_database()
         self.db_session = get_db_session()
         self.simulation_id = None  # Will be set when simulation starts
         self.portfolio_value = 100000  # Starting with $100k

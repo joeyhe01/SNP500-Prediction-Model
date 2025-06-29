@@ -7,6 +7,8 @@ torch>=2.0.1
 python-dateutil>=2.8.2
 pytz>=2023.3
 sentencepiece>=0.1.95
+psycopg2
+psycopg2-binary
 Flask==2.3.2
 # New dependencies for realtime news APIs
 newsapi-python==0.2.7

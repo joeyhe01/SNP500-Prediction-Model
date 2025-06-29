@@ -115,17 +115,27 @@ class RealtimePrediction(Base):
 # Database setup
 def get_db_session():
     """Create and return a database session"""
-    # Create SQLite database in root directory
-    engine = create_engine('sqlite:///trading_data.db')
+    # Use PostgreSQL connection from environment variables
+    db_user = os.getenv('POSTGRES_USER', 'postgres')
+    db_password = os.getenv('POSTGRES_PASSWORD', 'postgres')
+    db_host = os.getenv('POSTGRES_HOST', 'localhost')
+    db_port = os.getenv('POSTGRES_PORT', '5432')
+    db_name = os.getenv('POSTGRES_DB', 'trading_data')
+    db_url = f'postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}'
+    engine = create_engine(db_url)
     Base.metadata.create_all(engine)
-    
-    # Create session
     Session = sessionmaker(bind=engine)
     return Session()
 
 
 def init_database():
-    """Initialize the database"""
-    session = get_db_session()
-    session.close()
-    print("Database initialized successfully") 
+    """Initialize the database (create tables if they do not exist)"""
+    db_user = os.getenv('POSTGRES_USER', 'postgres')
+    db_password = os.getenv('POSTGRES_PASSWORD', 'postgres')
+    db_host = os.getenv('POSTGRES_HOST', 'localhost')
+    db_port = os.getenv('POSTGRES_PORT', '5432')
+    db_name = os.getenv('POSTGRES_DB', 'trading_data')
+    db_url = f'postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}'
+    engine = create_engine(db_url)
+    Base.metadata.create_all(engine)  # Idempotent: only creates tables if they do not exist
+    print("Database initialized successfully")
