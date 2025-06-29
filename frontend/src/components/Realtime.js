@@ -156,11 +156,9 @@ const Realtime = () => {
       const response = await axios.post('/api/realtime/fetch-data', requestData);
       
       if (response.data.success) {
-        console.log('Fetch data api success. Fetch response:', response.data); // Debug log
         setFetchMessage(response.data.message);
         // Refresh data status after fetching
         loadDataStatus();
-        console.log('Data status after fetch:', dataStatus); // Debug log
         // Auto-clear the message after 5 seconds
         setTimeout(() => setFetchMessage(null), 5000);
       } else {

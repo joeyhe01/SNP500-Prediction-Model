@@ -23,7 +23,6 @@ class StockSimulation:
         else:
             self.model = model_class()
         self.price_fetcher = StockPriceFetcher()
-        # init_database()
         self.db_session = get_db_session()
         self.simulation_id = None  # Will be set when simulation starts
         self.portfolio_value = 100000  # Starting with $100k
