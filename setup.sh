@@ -37,7 +37,7 @@ source venv/bin/activate
 
 # Install Python dependencies
 echo "Installing Python dependencies..."
-pip install flask requests
+pip install -r requirements.txt
 
 # Create directories if they don't exist
 echo "Setting up project structure..."
