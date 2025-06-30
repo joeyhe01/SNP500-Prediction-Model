@@ -345,22 +345,8 @@ const Realtime = () => {
             >
               {fetchingData ? '⏳' : '🤖'} NewsAPI.ai
             </button>
-            <button 
-              className={`api-btn alpha-vantage-btn ${fetchingData ? 'loading' : ''}`}
-              onClick={() => fetchFromSpecificAPI('Alpha Vantage', '/api/realtime/fetch-alpha-vantage')}
-              disabled={fetchingData || loading}
-              title="Fetch ticker-specific news from Alpha Vantage News & Sentiment API"
-            >
-              {fetchingData ? '⏳' : '📈'} Alpha Vantage
-            </button>
-            <button 
-              className={`api-btn newsapi-org-btn ${fetchingData ? 'loading' : ''}`}
-              onClick={() => fetchFromSpecificAPI('NewsAPI.org', '/api/realtime/fetch-newsapi')}
-              disabled={fetchingData || loading}
-              title="Fetch financial news from NewsAPI.org"
-            >
-              {fetchingData ? '⏳' : '📰'} NewsAPI.org
-            </button>
+
+
           </div>
           <div className="api-info">
             <p className="info-text">
