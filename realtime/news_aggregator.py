@@ -68,7 +68,7 @@ class RealtimeNewsAggregator:
             
         # All tickers from the sentiment model
         tickers = [
-            'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'TSLA', 'NVDA', 'JPM', 'JNJ', 'V',
+            'AAPL', 'MSFT', 'GOOG', 'AMZN', 'META', 'TSLA', 'NVDA', 'JPM', 'JNJ', 'V',
             'PG', 'UNH', 'HD', 'MA', 'DIS', 'BAC', 'NFLX', 'ADBE', 'CRM', 'PFE',
             'CSCO', 'INTC', 'WMT', 'IBM', 'BA', 'GS', 'MS', 'CVX', 'XOM', 'VZ',
             'T', 'KO', 'PEP', 'NKE', 'MRK', 'ABBV', 'TMO', 'COST', 'AVGO', 'ORCL',
@@ -79,7 +79,7 @@ class RealtimeNewsAggregator:
             'UBER', 'SBUX', 'SPOT', 'ABNB', 'PYPL', 'SQ', 'COIN', 'ROKU', 'ZM', 'DOCU',
             'ETSY', 'SHOP', 'TWLO', 'SNAP', 'PINS', 'LYFT', 'DBX', 'W', 'PTON', 'HOOD',
             'F', 'GM', 'RIVN', 'LCID', 'NIO', 'LI', 'XPEV', 'PLTR', 'NET', 'DDOG',
-            'CRWD', 'OKTA', 'MDB', 'TEAM', 'FTNT', 'WDAY', 'ADSK', 'EA', 'TTWO', 'ATVI',
+            'CRWD', 'OKTA', 'MDB', 'TEAM', 'FTNT', 'WDAY', 'ADSK', 'EA', 'TTWO',
             'RBLX', 'U', 'MSCI', 'MCO', 'ICE', 'NDAQ', 'CBOE', 'WFC', 'USB', 'PNC',
             'TFC', 'SCHW', 'COF', 'AIG', 'MET', 'PRU', 'TRV', 'AFL', 'ALL', 'PGR',
             'CB', 'HIG', 'WBA', 'CI', 'HUM', 'CNC', 'ELV'
@@ -164,7 +164,7 @@ class RealtimeNewsAggregator:
         ticker_to_company = {
             'AAPL': 'Apple',
             'MSFT': 'Microsoft',
-            'GOOGL': 'Google Alphabet',
+            'GOOG': 'Google Alphabet',
             'AMZN': 'Amazon',
             'META': 'Meta Facebook',
             'TSLA': 'Tesla',
@@ -281,7 +281,6 @@ class RealtimeNewsAggregator:
             'ADSK': 'Autodesk',
             'EA': 'Electronic Arts',
             'TTWO': 'Take-Two Interactive',
-            'ATVI': 'Activision Blizzard',
             'RBLX': 'Roblox',
             'U': 'Unity',
             'MSCI': 'MSCI',
