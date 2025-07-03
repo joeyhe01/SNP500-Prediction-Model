@@ -14,3 +14,10 @@ npm run build
 cd ..
 
 echo "✅ Setup complete! All dependencies installed and frontend built."
+
+echo "Now make sure to launch Postgres using a command like the following: docker run \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=trading_data \
+  -p 5432:5432 \
+  -d postgres:15"
