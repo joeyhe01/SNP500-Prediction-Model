@@ -851,23 +851,9 @@
   background: linear-gradient(135deg, #047857, #065f46);
 }
 
-.alpha-vantage-btn {
-  background: linear-gradient(135deg, #dc2626, #b91c1c);
-  color: white;
-}
 
-.alpha-vantage-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, #b91c1c, #991b1b);
-}
 
-.newsapi-org-btn {
-  background: linear-gradient(135deg, #ea580c, #dc2626);
-  color: white;
-}
 
-.newsapi-org-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, #dc2626, #b91c1c);
-}
 
 .api-info {
   margin-top: 1rem;
