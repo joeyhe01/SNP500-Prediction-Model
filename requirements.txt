@@ -9,6 +9,7 @@ pytz>=2023.3
 sentencepiece>=0.1.95
 psycopg2-binary
 Flask==2.3.2
+gunicorn
 # New dependencies for realtime news APIs
 finnhub-python==2.4.20
 # OpenAI for LLM-based sentiment analysis

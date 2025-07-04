@@ -12,7 +12,7 @@ python app.py &
 
 # Start frontend
 cd frontend
-npm start &
+npm run start:frontend &
 
 # Wait for both to exit (Ctrl+C to stop)
 wait
