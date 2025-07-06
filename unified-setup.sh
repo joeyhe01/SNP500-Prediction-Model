@@ -2,9 +2,16 @@
 set -e
 
 echo "🔧 Installing backend Python dependencies..."
-python3 -m venv venv
-source venv/bin/activate
-pip install --upgrade pip
+#python3 -m venv venv
+python -m venv venv
+#source venv/bin/activate
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
+  source venv/Scripts/activate
+else
+  source venv/bin/activate
+fi
+python -m pip install --upgrade pip
+#pip install --upgrade pip
 pip install -r requirements.txt
 
 echo "📁 Installing frontend npm dependencies and building static files..."

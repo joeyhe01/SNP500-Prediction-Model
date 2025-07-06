@@ -1,0 +1,7 @@
+Collecting sqlalchemy
+  Using cached sqlalchemy-2.0.41-cp310-cp310-win_amd64.whl (2.1 MB)
+Requirement already satisfied: typing-extensions>=4.6.0 in c:\users\lucas\.pyenv\pyenv-win\versions\3.10.0\lib\site-packages (from sqlalchemy) (4.13.2)
+Collecting greenlet>=1
+  Using cached greenlet-3.2.3-cp310-cp310-win_amd64.whl (296 kB)
+Installing collected packages: greenlet, sqlalchemy
+Successfully installed greenlet-3.2.3 sqlalchemy-2.0.41

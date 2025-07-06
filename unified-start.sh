@@ -2,7 +2,12 @@
 set -e
 
 # Activate Python venv
-source venv/bin/activate
+#source venv/bin/activate
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" ]]; then
+  source venv/Scripts/activate
+else
+  source venv/bin/activate
+fi
 
 # Start backend (Flask) and frontend (React) concurrently
 echo "🚀 Starting backend and frontend..."
