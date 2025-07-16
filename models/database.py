@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, String, Float, Date, UniqueConstraint, Integer, DateTime, Index, Text, JSON
+from sqlalchemy import create_engine, Column, String, Float, Date, UniqueConstraint, Integer, DateTime, Index, Text, JSON, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from pgvector.sqlalchemy import Vector
@@ -133,8 +133,7 @@ class SECFilings(Base):
     )
 
     def __repr__(self):
-        return f"<SECFilings(accession={self.accession_number}, chunk_id={self.chunk_id})>"
-
+        return f"<SECFilings(accession={self.accession_number}, chunk_id={self.chunk_id})>" 
 
 _engine = None
 _Session = None
@@ -155,6 +154,8 @@ def init_database():
     if not _db_initialized:
         if _engine is None:
             _engine = get_engine()
+        with _engine.connect() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
         Base.metadata.create_all(_engine)  # Idempotent
         _db_initialized = True
         print("Database initialized successfully")
