@@ -3,13 +3,18 @@
 Flask web application for S&P 500 trading simulation analysis
 """
 
+import os
+import signal
+import sys
+# Set tokenizers parallelism to avoid multiprocessing issues
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 from flask import Flask, jsonify, request, send_from_directory, send_file
 from models.database import get_db_session
 from models.database import Simulation, DailyRecap, NewsSentiment, News, RealtimePrediction
 from sqlalchemy import desc, asc, func, cast, Date, and_
 from datetime import datetime, timedelta
 import json
-import os
 import logging
 from sqlalchemy.orm import aliased
 import time
@@ -26,6 +31,247 @@ app = Flask(__name__, static_folder='frontend/build/static', template_folder='fr
 def serve():
     """Serve the React app"""
     return send_from_directory(app.template_folder, 'index.html')
+
+# Vector Search Endpoints (must be before catch-all route)
+@app.route('/api/vector/search', methods=['POST'])
+def vector_search_endpoint():
+    """Search for semantically similar news articles"""
+    try:
+        from models.vector_db import vector_search
+        
+        data = request.get_json()
+        query = data.get('query', '').strip()
+        k = min(data.get('k', 10), 50)  # Limit to 50 results max
+        
+        if not query:
+            return jsonify({
+                'success': False,
+                'error': 'Query is required'
+            }), 400
+        
+        if not vector_search.is_loaded:
+            return jsonify({
+                'success': False,
+                'error': 'Vector search engine not available. Please run backfill_vector_db.py first.'
+            }), 503
+        
+        # Perform search
+        results = vector_search.search(query, k)
+        
+        # Format results
+        formatted_results = []
+        for news_record, similarity in results:
+            formatted_results.append({
+                'id': news_record.id,
+                'title': news_record.title,
+                'description': news_record.description,
+                'date_publish': news_record.date_publish.isoformat(),
+                'ticker_metadata': news_record.ticker_metadata,
+                'similarity_score': similarity
+            })
+        
+        return jsonify({
+            'success': True,
+            'query': query,
+            'results': formatted_results,
+            'total_found': len(formatted_results)
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/vector/search_by_ticker/<ticker>')
+def search_by_ticker_endpoint(ticker):
+    """Search for news articles mentioning a specific ticker"""
+    try:
+        from models.vector_db import vector_search
+        
+        ticker = ticker.upper().strip()
+        k = min(request.args.get('k', 10, type=int), 50)
+        
+        if not ticker:
+            return jsonify({
+                'success': False,
+                'error': 'Ticker is required'
+            }), 400
+        
+        if not vector_search.is_loaded:
+            return jsonify({
+                'success': False,
+                'error': 'Vector search engine not available. Please run backfill_vector_db.py first.'
+            }), 503
+        
+        # Perform search
+        results = vector_search.search_by_ticker(ticker, k)
+        
+        # Format results
+        formatted_results = []
+        for news_record, price_change in results:
+            formatted_results.append({
+                'id': news_record.id,
+                'title': news_record.title,
+                'description': news_record.description,
+                'date_publish': news_record.date_publish.isoformat(),
+                'ticker_metadata': news_record.ticker_metadata,
+                'price_change_pct': price_change
+            })
+        
+        return jsonify({
+            'success': True,
+            'ticker': ticker,
+            'results': formatted_results,
+            'total_found': len(formatted_results)
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/vector/stats')
+def vector_stats_endpoint():
+    """Get statistics about the vector database"""
+    try:
+        from models.vector_db import vector_search
+        
+        stats = vector_search.get_stats()
+        
+        return jsonify({
+            'success': True,
+            'stats': stats
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/vector/recent_news')
+def recent_news_endpoint():
+    """Get recent news articles from the vector database"""
+    try:
+        from models.vector_db import vector_search
+        
+        days = min(request.args.get('days', 30, type=int), 365)  # Max 1 year
+        limit = min(request.args.get('limit', 20, type=int), 100)  # Max 100 results
+        
+        if not vector_search.is_loaded:
+            return jsonify({
+                'success': False,
+                'error': 'Vector search engine not available. Please run backfill_vector_db.py first.'
+            }), 503
+        
+        # Get recent news
+        news_records = vector_search.get_recent_news(days, limit)
+        
+        # Format results
+        formatted_results = []
+        for news_record in news_records:
+            formatted_results.append({
+                'id': news_record.id,
+                'title': news_record.title,
+                'description': news_record.description,
+                'date_publish': news_record.date_publish.isoformat(),
+                'ticker_metadata': news_record.ticker_metadata
+            })
+        
+        return jsonify({
+            'success': True,
+            'results': formatted_results,
+            'total_found': len(formatted_results),
+            'days': days
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/sentiment/<int:sentiment_id>/similar_articles')
+def get_similar_articles_for_sentiment(sentiment_id):
+    """Get similar articles for a specific sentiment record"""
+    try:
+        from models.vector_db import vector_search
+        from models.database import NewsSentiment, NewsFaiss
+        
+        session = get_db_session()
+        
+        # Get the sentiment record
+        sentiment_record = session.query(NewsSentiment).filter(
+            NewsSentiment.id == sentiment_id
+        ).first()
+        
+        if not sentiment_record:
+            return jsonify({
+                'success': False,
+                'error': 'Sentiment record not found'
+            }), 404
+        
+        # Get similar article IDs and scores
+        similar_faiss_data = sentiment_record.similar_news_faiss_ids or []
+        
+        if not similar_faiss_data:
+            return jsonify({
+                'success': True,
+                'similar_articles': [],
+                'total_found': 0
+            })
+        
+        # Fetch the actual NewsFaiss records
+        similar_articles = []
+        for faiss_data in similar_faiss_data:
+            # Handle both [id, score] and just id formats for backwards compatibility
+            if isinstance(faiss_data, list) and len(faiss_data) == 2:
+                faiss_id, similarity_score = faiss_data
+            else:
+                faiss_id = faiss_data
+                similarity_score = None
+            
+            # Get the NewsFaiss record
+            news_faiss = session.query(NewsFaiss).filter(
+                NewsFaiss.id == faiss_id
+            ).first()
+            
+            if news_faiss:
+                article_data = {
+                    'id': news_faiss.id,
+                    'title': news_faiss.title,
+                    'description': news_faiss.description,
+                    'date_publish': news_faiss.date_publish.isoformat(),
+                    'ticker_metadata': news_faiss.ticker_metadata,
+                }
+                
+                # Add similarity score if available
+                if similarity_score is not None:
+                    article_data['similarity_score'] = similarity_score
+                
+                similar_articles.append(article_data)
+        
+        session.close()
+        
+        return jsonify({
+            'success': True,
+            'sentiment_id': sentiment_id,
+            'similar_articles': similar_articles,
+            'total_found': len(similar_articles)
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 
 @app.route('/<path:path>')
 def serve_static(path):
@@ -235,9 +481,11 @@ def get_day_details(simulation_id, date):
             sentiment_data_list = []
             for sentiment in sentiments:
                 sentiment_data_list.append({
+                    'id': sentiment.id,  # Add ID for similar articles dropdown
                     'ticker': sentiment.ticker,
                     'sentiment': sentiment.sentiment,
-                    'extra_data': sentiment.extra_data
+                    'extra_data': sentiment.extra_data,
+                    'similar_news_faiss_ids': sentiment.similar_news_faiss_ids  # For dropdown functionality
                 })
             
             news_item = {
@@ -901,8 +1149,10 @@ def get_realtime_prediction_details(prediction_id):
             if sentiment_record.headline_id not in stored_sentiment_map:
                 stored_sentiment_map[sentiment_record.headline_id] = []
             stored_sentiment_map[sentiment_record.headline_id].append({
+                'id': sentiment_record.id,  # Add ID for similar articles dropdown
                 'ticker': sentiment_record.ticker,
-                'sentiment': sentiment_record.sentiment
+                'sentiment': sentiment_record.sentiment,
+                'similar_news_faiss_ids': sentiment_record.similar_news_faiss_ids  # For dropdown functionality
             })
             
             # Collect unique tickers and sentiments for filter options
@@ -1177,5 +1427,44 @@ def get_realtime_data_status():
     finally:
         session.close()
 
+
+# Initialize vector search engine when the app starts
+
+
+# Initialize vector search engine when the app starts
+def initialize_app():
+    """Initialize application components"""
+    try:
+        from models.vector_db import initialize_vector_search
+        success = initialize_vector_search()
+        if success:
+            print("✓ Vector search engine initialized successfully")
+        else:
+            print("⚠ Vector search engine not available (run backfill_vector_db.py to create it)")
+    except Exception as e:
+        print(f"⚠ Could not initialize vector search engine: {e}")
+
+
+def signal_handler(sig, frame):
+    """Handle shutdown signals gracefully"""
+    print('\nShutting down gracefully...')
+    sys.exit(0)
+
 if __name__ == '__main__':
+
     app.run(debug=True, port=5001)
+
+    # Register signal handlers for graceful shutdown
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    initialize_app()
+    
+    try:
+        app.run(debug=True, port=5001, threaded=True)
+    except KeyboardInterrupt:
+        print('\nShutdown requested by user')
+    except Exception as e:
+        print(f'Server error: {e}')
+    finally:
+        print('Server stopped') 

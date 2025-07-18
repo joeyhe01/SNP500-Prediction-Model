@@ -65,6 +65,7 @@ class NewsSentiment(Base):
     sentiment = Column(String, nullable=False)  # 'positive', 'negative', 'neutral'
     ticker = Column(String)  # Extracted ticker from headline
     extra_data = Column(JSON)  # For future vector db use
+    similar_news_faiss_ids = Column(JSON)  # Array of [faiss_id, similarity_score] pairs for similar news articles
     
     __table_args__ = (
         Index('idx_news_sentiment_simulation', 'simulation_id'),
@@ -115,6 +116,7 @@ class RealtimePrediction(Base):
 class SECFilings(Base):
     __tablename__ = 'sec_filings'
 
+
     id = Column(Integer, primary_key=True, autoincrement=True)
     accession_number = Column(String, nullable=False, index=True)  
     chunk_id = Column(Integer, nullable=False)                     
@@ -126,6 +128,30 @@ class SECFilings(Base):
     source_file = Column(String)
     metadata_json = Column(JSON)
     embedding = Column(Vector(384))                                    
+
+class NewsFaiss(Base):
+    __tablename__ = 'news_faiss'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    faiss_id = Column(Integer, nullable=False)
+    date_publish = Column(DateTime, nullable=False)
+    title = Column(String, nullable=False)
+    description = Column(String, nullable=False)
+    ticker_metadata = Column(JSON, nullable=False)
+    
+    
+    
+# Database setup
+def get_db_session():
+    """Create and return a database session"""
+    # Create SQLite database in root directory
+    engine = create_engine('sqlite:///trading_data.db')
+    Base.metadata.create_all(engine)
+    
+    # Create session
+    Session = sessionmaker(bind=engine)
+    return Session()
+
 
     __table_args__ = (
         # Prevent duplicates if multiple ingestions run

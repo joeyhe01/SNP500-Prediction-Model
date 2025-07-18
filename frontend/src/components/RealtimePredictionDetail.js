@@ -20,6 +20,11 @@ const RealtimePredictionDetail = () => {
   const [tickerSummary, setTickerSummary] = useState(null);
   const [tickerSummaryLoading, setTickerSummaryLoading] = useState(true);
   const [tickerSummaryError, setTickerSummaryError] = useState(null);
+  
+  // State for similar articles functionality
+  const [expandedSimilarArticles, setExpandedSimilarArticles] = useState({});
+  const [similarArticlesData, setSimilarArticlesData] = useState({});
+  const [loadingSimilarArticles, setLoadingSimilarArticles] = useState({});
 
   useEffect(() => {
     loadPredictionDetails();
@@ -82,6 +87,42 @@ const RealtimePredictionDetail = () => {
       setTickerSummaryError(`Error loading ticker sentiment: ${err.response?.data?.error || err.message}`);
     } finally {
       setTickerSummaryLoading(false);
+    }
+  };
+
+  // Function to load similar articles for a sentiment record
+  const loadSimilarArticles = async (sentimentId) => {
+    setLoadingSimilarArticles(prev => ({ ...prev, [sentimentId]: true }));
+    
+    try {
+      const response = await axios.get(`/api/sentiment/${sentimentId}/similar_articles`);
+      setSimilarArticlesData(prev => ({ 
+        ...prev, 
+        [sentimentId]: response.data.similar_articles 
+      }));
+    } catch (err) {
+      console.error(`Error loading similar articles for sentiment ${sentimentId}:`, err);
+      setSimilarArticlesData(prev => ({ 
+        ...prev, 
+        [sentimentId]: [] 
+      }));
+    } finally {
+      setLoadingSimilarArticles(prev => ({ ...prev, [sentimentId]: false }));
+    }
+  };
+
+  // Function to toggle similar articles dropdown
+  const toggleSimilarArticles = (sentimentId) => {
+    const isCurrentlyExpanded = expandedSimilarArticles[sentimentId];
+    
+    setExpandedSimilarArticles(prev => ({
+      ...prev,
+      [sentimentId]: !isCurrentlyExpanded
+    }));
+    
+    // Load similar articles if expanding and not already loaded
+    if (!isCurrentlyExpanded && !similarArticlesData[sentimentId]) {
+      loadSimilarArticles(sentimentId);
     }
   };
 
@@ -615,7 +656,14 @@ const RealtimePredictionDetail = () => {
           <div className="news-list">
             {filteredArticles.length > 0 ? (
               filteredArticles.map(article => (
-                <NewsItem key={article.headline_id} item={article} />
+                <NewsItem 
+                  key={article.headline_id} 
+                  item={article}
+                  expandedSimilarArticles={expandedSimilarArticles}
+                  toggleSimilarArticles={toggleSimilarArticles}
+                  loadingSimilarArticles={loadingSimilarArticles}
+                  similarArticlesData={similarArticlesData}
+                />
               ))
             ) : (
               <div className="no-news">
@@ -629,7 +677,7 @@ const RealtimePredictionDetail = () => {
   );
 };
 
-const NewsItem = ({ item }) => {
+const NewsItem = ({ item, expandedSimilarArticles, toggleSimilarArticles, loadingSimilarArticles, similarArticlesData }) => {
   const [expanded, setExpanded] = useState(false);
 
   const getSentimentBadgeClass = (sentiment) => {
@@ -645,6 +693,25 @@ const NewsItem = ({ item }) => {
     if (!hasAnalysis) return 'No Analysis';
     return sentiment || 'Neutral';
   };
+
+  // Find the first sentiment record that has similar articles data for this article
+  const getSimilarArticlesData = () => {
+    if (!item.sentiment_data || !Array.isArray(item.sentiment_data)) return null;
+    
+    for (const sentiment of item.sentiment_data) {
+      if (sentiment.id && sentiment.similar_news_faiss_ids && 
+          Array.isArray(sentiment.similar_news_faiss_ids) && 
+          sentiment.similar_news_faiss_ids.length > 0) {
+        return {
+          sentimentId: sentiment.id,
+          similarIds: sentiment.similar_news_faiss_ids
+        };
+      }
+    }
+    return null;
+  };
+
+  const similarArticlesInfo = getSimilarArticlesData();
 
   return (
     <div className={`news-item ${item.has_analysis ? 'analyzed' : 'not-analyzed'}`}>
@@ -665,11 +732,13 @@ const NewsItem = ({ item }) => {
           {item.has_analysis && item.sentiment_data && item.sentiment_data.length > 0 ? (
             <div className="sentiment-badges-container">
               {item.sentiment_data.map((sentimentItem, index) => (
-                <div key={index} className="ticker-sentiment-pair">
-                  <span className="ticker-badge">{sentimentItem.ticker}</span>
-                  <span className={`sentiment-badge ${getSentimentBadgeClass(sentimentItem.sentiment)}`}>
-                    {sentimentItem.sentiment}
-                  </span>
+                <div key={index} className="ticker-sentiment-container">
+                  <div className="ticker-sentiment-pair">
+                    <span className="ticker-badge">{sentimentItem.ticker}</span>
+                    <span className={`sentiment-badge ${getSentimentBadgeClass(sentimentItem.sentiment)}`}>
+                      {sentimentItem.sentiment}
+                    </span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -681,6 +750,68 @@ const NewsItem = ({ item }) => {
             </div>
           )}
         </div>
+        
+        {/* Similar Articles Button - shown once per article */}
+        {similarArticlesInfo && (
+          <div className="article-similar-articles-section">
+            <button 
+              className="similar-articles-toggle"
+              onClick={() => toggleSimilarArticles(similarArticlesInfo.sentimentId)}
+              title="View similar historical articles used for analysis"
+              style={{marginTop: '8px', backgroundColor: '#e3f2fd', border: '1px solid #2196f3', color: '#1976d2'}}
+            >
+              {expandedSimilarArticles[similarArticlesInfo.sentimentId] ? '▼' : '▶'} Similar Articles ({similarArticlesInfo.similarIds.length})
+            </button>
+            
+            {/* Similar Articles Dropdown */}
+            {expandedSimilarArticles[similarArticlesInfo.sentimentId] && (
+              <div className="similar-articles-dropdown">
+                {loadingSimilarArticles[similarArticlesInfo.sentimentId] ? (
+                  <div className="loading-similar">Loading similar articles...</div>
+                ) : similarArticlesData[similarArticlesInfo.sentimentId] && similarArticlesData[similarArticlesInfo.sentimentId].length > 0 ? (
+                  <div className="similar-articles-list">
+                    <h4>Historical Context Used for Analysis:</h4>
+                    {similarArticlesData[similarArticlesInfo.sentimentId].map((article, articleIndex) => (
+                      <div key={articleIndex} className="similar-article-item">
+                        <div className="similar-article-header">
+                          <span className="similar-article-date">
+                            {new Date(article.date_publish).toLocaleDateString()}
+                          </span>
+                          {article.similarity_score && (
+                            <span className="similarity-score">
+                              Similarity: {(article.similarity_score * 100).toFixed(1)}%
+                            </span>
+                          )}
+                        </div>
+                        <h5 className="similar-article-title">{article.title}</h5>
+                        <p className="similar-article-description">
+                          {article.description.length > 150 
+                            ? `${article.description.substring(0, 150)}...`
+                            : article.description
+                          }
+                        </p>
+                        {article.ticker_metadata && Object.keys(article.ticker_metadata).length > 0 && (
+                          <div className="historical-price-changes">
+                            <strong>Historical Price Impact:</strong>
+                            <div className="price-changes">
+                              {Object.entries(article.ticker_metadata).map(([ticker, change]) => (
+                                <span key={ticker} className={`price-change ${change > 0 ? 'positive' : change < 0 ? 'negative' : 'neutral'}`}>
+                                  {ticker}: {change > 0 ? '+' : ''}{change.toFixed(2)}%
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="no-similar-articles">No similar historical articles found.</div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
       
       <h3 className="news-title">{item.title}</h3>
