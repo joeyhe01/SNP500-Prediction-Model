@@ -10,6 +10,9 @@ from models.database import get_db_session, News, NewsSentiment
 from sqlalchemy import and_, or_
 import logging
 
+# Import vector search for RAG functionality
+from models.vector_db import search_news, initialize_vector_search
+
 logger = logging.getLogger(__name__)
 
 class LLMSentimentModel:
@@ -19,11 +22,21 @@ class LLMSentimentModel:
         self.session = get_db_session()
         
         # Initialize OpenAI client
-        api_key = "put key here"
+        api_key = os.getenv("OPENAI_API_KEY")
+        # api_key = "put key here"
         if not api_key:
             raise ValueError("OPENAI_API_KEY environment variable is required")
         
         self.client = OpenAI(api_key=api_key)
+        
+        # Initialize vector search engine for RAG
+        try:
+            initialize_vector_search()
+            if self.debug:
+                print("✓ Vector search engine initialized for RAG")
+        except Exception as e:
+            if self.debug:
+                print(f"⚠ Could not initialize vector search: {e}")
         
         # Common S&P 500 tickers for validation
         self.sp500_tickers = {
@@ -47,21 +60,23 @@ class LLMSentimentModel:
         if self.debug:
             print(f"LLM Sentiment Model initialized with {len(self.sp500_tickers)} known tickers")
     
-    def analyze_news_sentiment(self, headline: str, summary: str = None) -> List[Dict]:
+    def analyze_news_sentiment(self, headline: str, summary: str = None) -> Tuple[List[Dict], List[List]]:
         """
-        Use OpenAI to analyze news sentiment and extract ticker/sentiment pairs
+        Use OpenAI with RAG to analyze news sentiment and extract ticker/sentiment pairs
         
         Args:
             headline: News headline text
             summary: News summary text (optional)
             
         Returns:
-            List of dictionaries with 'ticker' and 'sentiment' keys
+            Tuple of:
+                - List of dictionaries with 'ticker' and 'sentiment' keys
+                - List of [faiss_id, similarity_score] pairs for similar articles used as context
         """
         if not headline or not isinstance(headline, str):
             if self.debug:
                 print(f"Invalid headline input: {headline}")
-            return []
+            return [], []
         
         try:
             # Prepare the content for analysis
@@ -69,16 +84,61 @@ class LLMSentimentModel:
             if summary and isinstance(summary, str) and summary.strip():
                 content += f"\n\nSummary: {summary}"
             
-            # Create the prompt for OpenAI
-            prompt = f"""Analyze this financial news and determine which publicly traded companies (stocks) might be affected and how.
+            # RAG Enhancement: Query vector database for similar historical articles
+            similar_results = search_news(content, k=5)
+            
+            similar_articles = []
+            similar_faiss_ids = []  # Will store tuples of (faiss_id, similarity_score)
+            
+            for news_record, similarity in similar_results:
+                if self.debug:
+                    print(f"  Found similar article: '{news_record.title[:80]}...' (similarity: {similarity:.3f})")
+                
+                if similarity > 0.3:  # Lower threshold for better RAG context
+                    similar_articles.append({
+                        'title': news_record.title,
+                        'description': news_record.description,
+                        'date': news_record.date_publish.strftime('%Y-%m-%d'),
+                        'ticker_changes': news_record.ticker_metadata,
+                        'similarity': similarity
+                    })
+                    # Store as tuple: (faiss_id, similarity_score)
+                    similar_faiss_ids.append([news_record.id, round(similarity, 4)])
+            
+            if self.debug and similar_articles:
+                print(f"Found {len(similar_articles)} similar articles for RAG context")
+            
+            # Create the RAG-enhanced prompt for OpenAI
+            historical_context = ""
+            if similar_articles:
+                historical_context = "\n\nHISTORICAL CONTEXT - Similar news and market reactions:\n"
+                for i, article in enumerate(similar_articles, 1):
+                    historical_context += f"   Title: {article['title']}\n"
+                    historical_context += f"   Description: {article['description'][:200]}...\n"
+                    if article['ticker_changes']:
+                        historical_context += f"   Percentage change in price for ticker: {article['ticker_changes']}\n"
+                    historical_context += "\n"
+                
+                historical_context += "Use this historical context to better predict how the market might react to the current news.\n"
+            
+            prompt = f"""Analyze this financial news and determine which publicly traded companies (stocks) might be affected and how. Use historical market reactions to similar news to inform your analysis.
 
+CURRENT NEWS:
 {content}
+{historical_context}
+
+Based on the current news and any historical patterns from similar articles above, predict:
+1. Which publicly traded companies will be most affected
+2. How the market sentiment will likely change for each company
+3. Consider both immediate reactions and next-day market movements
 
 Please return a JSON array of objects, where each object has:
 - "ticker": The stock ticker symbol (e.g., "AAPL", "GOOGL", "TSLA")
 - "sentiment": Either "positive", "negative", or "neutral"
 
 Only include major publicly traded companies that are directly mentioned or significantly affected by this news. Focus on companies that are likely to be in major stock indices like the S&P 500.
+
+If historical similar articles show consistent patterns, factor that into your sentiment analysis. Consider how similar news affected stock prices in the past.
 
 If no specific companies are clearly affected, return an empty array.
 
@@ -120,7 +180,7 @@ Example response format:
                             print(f"Rate limit error - max retries exceeded: {e}")
                         else:
                             logger.error(f"Rate limit error - max retries exceeded: {e}")
-                        return []
+                        return [], similar_faiss_ids
                         
                 except (openai.APIError, openai.InternalServerError, openai.APIConnectionError) as e:
                     retry_count += 1
@@ -136,14 +196,14 @@ Example response format:
                             print(f"OpenAI API error - max retries exceeded: {e}")
                         else:
                             logger.error(f"OpenAI API error - max retries exceeded: {e}")
-                        return []
+                        return [], similar_faiss_ids
             
             if response is None:
                 if self.debug:
                     print("Failed to get response from OpenAI after retries")
                 else:
                     logger.error("Failed to get response from OpenAI after retries")
-                return []
+                return [], similar_faiss_ids
             
             # Parse the response
             response_text = response.choices[0].message.content.strip()
@@ -165,7 +225,7 @@ Example response format:
                 if not isinstance(ticker_sentiments, list):
                     if self.debug:
                         print(f"Response is not a list: {type(ticker_sentiments)}")
-                    return []
+                    return [], similar_faiss_ids
                 
                 # Validate and filter the results
                 valid_results = []
@@ -193,23 +253,26 @@ Example response format:
                 
                 if self.debug:
                     print(f"Valid results: {valid_results}")
+                    print(f"Similar articles used: {len(similar_faiss_ids)} articles with scores")
+                    if similar_faiss_ids:
+                        print(f"  ID-Score pairs: {similar_faiss_ids}")
                 
-                return valid_results
+                return valid_results, similar_faiss_ids
                 
             except json.JSONDecodeError as e:
                 if self.debug:
                     print(f"JSON decode error: {e}")
                     print(f"Response text: {response_text}")
-                return []
+                return [], similar_faiss_ids
                 
         except Exception as e:
             if self.debug:
                 print(f"Error in OpenAI analysis: {e}")
             else:
                 logger.error(f"Error in OpenAI sentiment analysis: {e}")
-            return []
+            return [], []
     
-    def store_sentiment_analysis(self, simulation_id, date, news_item, ticker_sentiments):
+    def store_sentiment_analysis(self, simulation_id, date, news_item, ticker_sentiments, similar_faiss_ids=None):
         """
         Store multiple sentiment analysis results in the database
         
@@ -218,6 +281,7 @@ Example response format:
             date: Trading date
             news_item: News item from database
             ticker_sentiments: List of dicts with 'ticker' and 'sentiment' keys
+            similar_faiss_ids: List of [faiss_id, similarity_score] pairs used for RAG context
         """
         try:
             # First, check if we already have sentiment analysis for this news item in this simulation
@@ -242,7 +306,8 @@ Example response format:
                     headline_id=news_item.id,
                     sentiment=ticker_sentiment['sentiment'],
                     ticker=ticker_sentiment['ticker'],
-                    extra_data={'source': 'openai_llm'}
+                    similar_news_faiss_ids=similar_faiss_ids or [],
+                    extra_data={'source': 'openai_llm_with_rag'}
                 )
                 self.session.add(news_sentiment)
             
@@ -297,11 +362,11 @@ Example response format:
         
         for news_item in relevant_news:
             # Use LLM to analyze sentiment and extract tickers
-            ticker_sentiments = self.analyze_news_sentiment(news_item.title, news_item.summary)
+            ticker_sentiments, similar_faiss_ids = self.analyze_news_sentiment(news_item.title, news_item.summary)
             
             if ticker_sentiments:
-                # Store in database with simulation_id
-                self.store_sentiment_analysis(simulation_id, date, news_item, ticker_sentiments)
+                # Store in database with simulation_id and similar article IDs
+                self.store_sentiment_analysis(simulation_id, date, news_item, ticker_sentiments, similar_faiss_ids)
                 
                 # Count sentiments by ticker
                 for ticker_sentiment in ticker_sentiments:

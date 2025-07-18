@@ -64,6 +64,7 @@ class NewsSentiment(Base):
     sentiment = Column(String, nullable=False)  # 'positive', 'negative', 'neutral'
     ticker = Column(String)  # Extracted ticker from headline
     extra_data = Column(JSON)  # For future vector db use
+    similar_news_faiss_ids = Column(JSON)  # Array of [faiss_id, similarity_score] pairs for similar news articles
     
     __table_args__ = (
         Index('idx_news_sentiment_simulation', 'simulation_id'),
@@ -112,6 +113,18 @@ class RealtimePrediction(Base):
         return f"<RealtimePrediction(id={self.id}, timestamp='{self.timestamp}', market_sentiment={self.market_sentiment_score})>"
 
 
+class NewsFaiss(Base):
+    __tablename__ = 'news_faiss'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    faiss_id = Column(Integer, nullable=False)
+    date_publish = Column(DateTime, nullable=False)
+    title = Column(String, nullable=False)
+    description = Column(String, nullable=False)
+    ticker_metadata = Column(JSON, nullable=False)
+    
+    
+    
 # Database setup
 def get_db_session():
     """Create and return a database session"""
