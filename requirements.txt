@@ -1,10 +1,6 @@
 numpy>=1.24.3
 pandas>=2.0.3
-<<<<<<< HEAD
-dotenv
-=======
 openpyxl
->>>>>>> e8f4f86 (vector database initialization and population)
 sqlalchemy>=2.0.16
 requests>=2.31.0
 transformers>=4.30.2
@@ -38,3 +34,4 @@ tiktoken
 #vector embedding/database
 sentence-transformers
 pgvector
+
