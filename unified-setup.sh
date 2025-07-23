@@ -24,6 +24,7 @@ echo "✅ Setup complete! All dependencies installed and frontend built."
 
 echo "To create a postgres container with pgvector extension run the following: 
   docker run \
+  --name sec_db \
   -e POSTGRES_USER=postgres \
   -e POSTGRES_PASSWORD=postgres \
   -e POSTGRES_DB=trading_data \
@@ -31,7 +32,7 @@ echo "To create a postgres container with pgvector extension run the following:
   -d ankane/pgvector:latest
   "
   
-echo "To start an already existing docker run: docker start vectordb (or your container name)
+echo "To start an already existing docker run: docker start sec_db (or your container name)
 
 echo "Acitavate the Postgres shell:
 docker exec -it $(docker ps -qf ancestor=ankane/pgvector:latest) psql -U postgres -d trading_data
@@ -42,3 +43,8 @@ echo "Then create the pgvector extension: CREATE EXTENSION IF NOT EXISTS vector;
 echo "Check extension was created: \dx"
 
 echo "Exit shell: \q"
+
+echo "Make sure to export AWS credentials to access S3 bucket
+export AWS_ACCESS_KEY_ID=your_access_key_id
+export AWS_SECRET_ACCESS_KEY=your_secret_access_key
+" 
