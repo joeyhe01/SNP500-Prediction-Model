@@ -5,28 +5,30 @@ from sqlalchemy.exc import IntegrityError
 from sentence_transformers import SentenceTransformer
 from database import Base, SECFilings
 
-# --- AWS S3 CONFIG ---
+#S3 configuration
 AWS_BUCKET_NAME = 'datasci-210-summer-2025-sec-documents'
 S3_PREFIX = '' 
 REGION = 'us-east-1'
 
-# --- DB CONFIG (adjust if needed) ---
+#database configuration
 DB_USER = 'postgres'
 DB_PASS = 'postgres'
 DB_HOST = 'localhost'
 DB_PORT = '5432'
 DB_NAME = 'trading_data'
 
-# --- SQLAlchemy setup ---
+#Initlaize database connection
 DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 engine = create_engine(DATABASE_URL)
 Session = sessionmaker(bind=engine)
 session = Session()
 
-# --- S3 Client setup ---
+#initialize connection to S3 bucket
+#make sure you exported your AWS credentials in the terminal
+#this function will default to looking for those
 s3 = boto3.client("s3", region_name=REGION)
 
-# --- Load sentence-transformer model ---
+#Load model
 model = SentenceTransformer('all-MiniLM-L6-v2')  # 384-dimensional embeddings
 
 def list_json_files(bucket, prefix=''):
@@ -38,16 +40,20 @@ def list_json_files(bucket, prefix=''):
                 yield obj["Key"]
 
 def load_json_from_s3(bucket, key):
-    '''Load JSON data from an S3 object.'''
+    '''
+    Load JSON data from an S3 object.
+    '''
     response = s3.get_object(Bucket=bucket, Key=key)
     return json.loads(response["Body"].read().decode("utf-8"))
 
 def process_and_insert_chunks(chunks):
-    '''Process each chunk and insert into the database.
+    '''
+    Process each chunk and insert into the database.
     '''
     for chunk in chunks:
         text = chunk.get("text", "")
-        vector = model.encode(text).tolist()  # Convert numpy array to list for SQLAlchemy Vector
+        #Convert numpy array to list for SQLAlchemy Vector
+        vector = model.encode(text).tolist()  
 
         record = SECFilings(
             accession_number=chunk.get("accession_number"),
