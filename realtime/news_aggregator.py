@@ -93,6 +93,7 @@ class RealtimeNewsAggregator:
             logger.info(f"Fetching Finnhub company news for {len(tickers)} tickers from {from_date} to {to_date}")
             
             for i, ticker in enumerate(tickers, 1):
+                ticker_saved = 0  # Initialize counter at the beginning of the loop
                 try:
                     logger.info(f"Processing ticker {i}/{len(tickers)}: {ticker}")
                     
@@ -100,8 +101,6 @@ class RealtimeNewsAggregator:
                     news = self.finnhub_client.company_news(ticker, _from=from_date, to=to_date)
                     
                     logger.info(f"  Got {len(news) if news else 0} articles for {ticker}")
-                    
-                    ticker_saved = 0
                     if news:  # Check if news is not None or empty
                         for article in news:
                             try:
@@ -314,6 +313,7 @@ class RealtimeNewsAggregator:
             logger.info(f"Fetching NewsAPI.ai news for {len(ticker_to_company)} companies")
             
             for i, (ticker, company_name) in enumerate(ticker_to_company.items(), 1):
+                ticker_saved = 0  # Initialize counter at the beginning of the loop
                 try:
                     logger.info(f"Processing {i}/{len(ticker_to_company)}: {ticker} ({company_name})")
                     
@@ -351,7 +351,6 @@ class RealtimeNewsAggregator:
                         else:
                             logger.warning(f"  Unexpected response structure for {company_name}: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
                         
-                        ticker_saved = 0
                         for article in articles:
                             try:
                                 # Parse publication date - NewsAPI.ai uses dateTime in UTC format

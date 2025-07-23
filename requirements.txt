@@ -16,7 +16,10 @@ gunicorn
 finnhub-python==2.4.20
 # OpenAI for LLM-based sentiment analysis
 
-openai>=1.0.0 
+openai>=1.0.0
+# FAISS for vector database
+faiss-cpu>=1.7.4
+sentence-transformers>=2.2.2 
 
 # misc/credential handeling, etc.
 dotenv

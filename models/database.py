@@ -65,6 +65,7 @@ class NewsSentiment(Base):
     sentiment = Column(String, nullable=False)  # 'positive', 'negative', 'neutral'
     ticker = Column(String)  # Extracted ticker from headline
     extra_data = Column(JSON)  # For future vector db use
+    similar_news_faiss_ids = Column(JSON)  # Array of [faiss_id, similarity_score] pairs for similar news articles
     
     __table_args__ = (
         Index('idx_news_sentiment_simulation', 'simulation_id'),
@@ -139,6 +140,16 @@ class SECFilings(Base):
             f"filing_date='{self.filing_date}', form_type='{self.form_type}')>"
         )                                  
 
+class NewsFaiss(Base):
+    __tablename__ = 'news_faiss'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    faiss_id = Column(Integer, nullable=False)
+    date_publish = Column(DateTime, nullable=False)
+    title = Column(String, nullable=False)
+    description = Column(String, nullable=False)
+    ticker_metadata = Column(JSON, nullable=False)
+
 
 _engine = None
 _Session = None
@@ -152,6 +163,7 @@ def get_engine():
     db_name = os.getenv('POSTGRES_DB', 'trading_data')
     db_url = f'postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}'
     return create_engine(db_url)
+
 
 def init_database():
     """Initialize the database (create tables, keys, and indices if they do not exist)"""

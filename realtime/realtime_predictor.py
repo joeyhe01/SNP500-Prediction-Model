@@ -8,10 +8,14 @@ import json
 import logging
 import threading
 import time
+import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Set tokenizers parallelism to avoid multiprocessing issues
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 from realtime.news_aggregator import RealtimeNewsAggregator
 from models.llm_sentiment_model import LLMSentimentModel
@@ -23,15 +27,32 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class RealtimeTradingPredictor:
-    def __init__(self, debug=False, database_only=False, max_workers=10):
+    def __init__(self, debug=False, database_only=False, max_workers=4):
         """Initialize the realtime predictor"""
         self.news_aggregator = RealtimeNewsAggregator()
         self.sentiment_model = LLMSentimentModel(debug=debug)
         self.db_session = get_db_session()
         self.debug = debug
         self.database_only = database_only
-        self.max_workers = max_workers
+        # Reduce max workers to prevent resource exhaustion
+        self.max_workers = min(max_workers, 4)  # Cap at 4 to prevent issues
         self.analysis_lock = threading.Lock()  # For thread-safe database operations
+        
+    def cleanup(self):
+        """Clean up resources to prevent leaks"""
+        try:
+            if hasattr(self, 'db_session') and self.db_session:
+                self.db_session.close()
+            if hasattr(self, 'news_aggregator'):
+                self.news_aggregator.close()
+            if hasattr(self, 'sentiment_model') and hasattr(self.sentiment_model, 'session'):
+                self.sentiment_model.session.close()
+        except Exception as e:
+            logger.warning(f"Error during cleanup: {e}")
+    
+    def __del__(self):
+        """Destructor to ensure cleanup"""
+        self.cleanup()
         
     def get_realtime_news(self, start_time=None, end_time=None) -> List[Dict]:
         """Get the latest news for analysis"""
@@ -95,7 +116,7 @@ class RealtimeTradingPredictor:
         """Analyze sentiment for a single article (thread worker function)"""
         try:
             # Use LLM to analyze sentiment and extract multiple tickers
-            ticker_sentiments = self.sentiment_model.analyze_news_sentiment(
+            ticker_sentiments, similar_faiss_ids = self.sentiment_model.analyze_news_sentiment(
                 article['title'], 
                 article.get('summary')
             )
@@ -108,6 +129,7 @@ class RealtimeTradingPredictor:
                         **article,
                         'ticker': ticker_sentiment['ticker'],
                         'sentiment': ticker_sentiment['sentiment'],
+                        'similar_faiss_ids': similar_faiss_ids,
                         'analyzed_at': datetime.now()
                     }
                     analyzed_articles.append(analyzed_article)
@@ -116,7 +138,7 @@ class RealtimeTradingPredictor:
                 # Use lock to ensure thread-safe database operations
                 if prediction_id is not None:
                     with self.analysis_lock:
-                        self.store_sentiment_analysis(prediction_id, article, ticker_sentiments)
+                        self.store_sentiment_analysis(prediction_id, article, ticker_sentiments, similar_faiss_ids)
                 
                 if self.debug:
                     tickers_found = [ts['ticker'] for ts in ticker_sentiments]
@@ -138,24 +160,40 @@ class RealtimeTradingPredictor:
         start_time = time.time()
         
         # Use ThreadPoolExecutor to process articles in parallel
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # Submit all articles for processing
-            future_to_article = {
-                executor.submit(self._analyze_single_article, article, prediction_id): article 
-                for article in news_articles
-            }
-            
-            # Collect results as they complete
-            completed_count = 0
-            for future in as_completed(future_to_article):
+        try:
+            with ThreadPoolExecutor(max_workers=self.max_workers, thread_name_prefix="sentiment_") as executor:
+                # Submit all articles for processing
+                future_to_article = {
+                    executor.submit(self._analyze_single_article, article, prediction_id): article 
+                    for article in news_articles
+                }
+                
+                # Collect results as they complete
+                completed_count = 0
+                for future in as_completed(future_to_article):
+                    try:
+                        article_results = future.result(timeout=60)  # Add timeout
+                        analyzed_articles.extend(article_results)
+                        completed_count += 1
+                        
+                        # Log progress every 50 articles to reduce log spam
+                        if completed_count % 50 == 0 or completed_count > len(news_articles) - 5:
+                            logger.info(f"Progress: {completed_count}/{len(news_articles)} articles processed")
+                    except Exception as e:
+                        completed_count += 1
+                        logger.error(f"Error processing article: {e}")
+                        continue
+        except Exception as e:
+            logger.error(f"ThreadPoolExecutor error: {e}")
+            # Fallback to sequential processing if threading fails
+            logger.info("Falling back to sequential processing...")
+            for article in news_articles:
                 try:
-                    article_results = future.result()
-                    analyzed_articles.extend(article_results)
-                    completed_count += 1
-                    
-                    # Log progress every 10 articles or for the last few
-                    if completed_count % 10 == 0 or completed_count > len(news_articles) - 5:
-                        logger.info(f"Progress: {completed_count}/{len(news_articles)} articles processed")
+                    results = self._analyze_single_article(article, prediction_id)
+                    analyzed_articles.extend(results)
+                except Exception as e:
+                    logger.error(f"Error in sequential processing: {e}")
+                    continue
                         
                 except Exception as e:
                     article = future_to_article[future]
@@ -170,7 +208,7 @@ class RealtimeTradingPredictor:
         
         return analyzed_articles
     
-    def store_sentiment_analysis(self, prediction_id: int, article: Dict, ticker_sentiments: List[Dict]):
+    def store_sentiment_analysis(self, prediction_id: int, article: Dict, ticker_sentiments: List[Dict], similar_faiss_ids: List = None):
         """Store multiple sentiment analysis results in database for realtime predictions"""
         try:
             # Use negative prediction_id to distinguish realtime predictions from simulations
@@ -198,6 +236,7 @@ class RealtimeTradingPredictor:
                         headline_id=article['id'],
                         sentiment=ticker_sentiment['sentiment'],
                         ticker=ticker_sentiment['ticker'],
+                        similar_news_faiss_ids=similar_faiss_ids,  # Store similar_faiss_ids
                         extra_data={'realtime_prediction_id': prediction_id, 'source': 'openai_llm'}
                     )
                     self.db_session.add(news_sentiment)
