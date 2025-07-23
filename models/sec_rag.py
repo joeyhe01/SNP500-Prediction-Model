@@ -33,19 +33,37 @@ def get_tickers() -> dict[str, str]:
     return tickers_ciks
 
 def get_latest_matching_chunks(ticker: str, sentiment: str, top_k=5):
+    '''
+    Query the vector database for SEC filing CHUNKS for the relevant tickers.
+    Function expects the following format:
+    [
+        {"ticker": "AAPL", "sentiment": "positive"},
+        {"ticker": "GOOGL", "sentiment": "negative"}
+    ]
+
+    INPUTS:
+    -   ticker: The stock ticker symbol (e.g., "AAPL")
+    -   sentiment: The sentiment to filter by (e.g., "positive" or "negative")
+    -   top_k: The number of top results to return (default is 5)
+
+    OUTPUTS:
+    -   List of matching SEC filing chunks:
+    '''
+    #Initialize the database session
     session = get_db_session()
 
+    #get a dictionary of abbreviated tickers to CIK mappings from wiki
     ticker_cik_dict = get_tickers()
-    
+    #format the CIKs as 10 digit strings to match the SEC filing format in vector database
     cik = str(ticker_cik_dict.get(ticker.upper()))
-    if not cik:
-        print(f"⚠️ No CIK found for ticker '{ticker}'")
-        return []
 
+    #
     search_query = f"{ticker} {sentiment}"
     query_vector = model.encode(search_query).tolist()
 
-    #sql query using <#> operator for vector similarity search
+    #sql query
+    #perform vector similarity serach taking the cosine between the 
+    #input vector and embedding vectors in the database
     sql = sa_text("""
         SELECT *
         FROM sec_filings
@@ -55,6 +73,7 @@ def get_latest_matching_chunks(ticker: str, sentiment: str, top_k=5):
         LIMIT :top_k
     """)
 
+    #format the result output into dictionary
     results = session.execute(sql, {
         "cik": cik,
         "embedding": query_vector,
@@ -64,22 +83,32 @@ def get_latest_matching_chunks(ticker: str, sentiment: str, top_k=5):
     return results
 
 def rag_query_pipeline(query_inputs):
+    '''
+    Query the RAG model for relevant SEC filing chunks based on user queries.
+    INPUTS:
+    -   query_inputs: List of dictionaries with keys "ticker" and "sentiment"
+    OUTPUTS:
+    -   List of dictionaries with matched SEC filing chunks for each query
+    '''
+    #initlaize reponse list
     all_responses = []
 
+    #go through all ticker:sentiment input queries
     for query in query_inputs:
+        #format ticker name for matching
         ticker = query.get("ticker", "").upper()
         sentiment = query.get("sentiment", "")
 
         print(f"🔍 Querying SEC filings for {ticker} ({sentiment})...")
+        #perform vector similarity cosine search
         matches = get_latest_matching_chunks(ticker, sentiment, top_k=5)
 
         match_snippets = [
             {
                 "chunk_id": row["chunk_id"],
                 "filing_date": row["filing_date"],
-                "text_snippet": row["text"][:500] + "..."  # Preview
-            }
-            for row in matches
+                "text_snippet": row["text"][:500] + "..."
+            } for row in matches
         ]
 
         all_responses.append({
