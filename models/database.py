@@ -155,15 +155,31 @@ _engine = None
 _Session = None
 _db_initialized = False
 
+#def get_engine():
+#    db_user = os.getenv('POSTGRES_USER', 'postgres')
+#    db_password = os.getenv('POSTGRES_PASSWORD', 'postgres')
+#    db_host = os.getenv('POSTGRES_HOST', 'localhost')
+#    db_port = os.getenv('POSTGRES_PORT', '5432')
+#    db_name = os.getenv('POSTGRES_DB', 'trading_data')
+#    db_url = f'postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}'
+#    return create_engine(db_url)
+# Detect SQLite override
 def get_engine():
-    db_user = os.getenv('POSTGRES_USER', 'postgres')
-    db_password = os.getenv('POSTGRES_PASSWORD', 'postgres')
-    db_host = os.getenv('POSTGRES_HOST', 'localhost')
-    db_port = os.getenv('POSTGRES_PORT', '5432')
-    db_name = os.getenv('POSTGRES_DB', 'trading_data')
-    db_url = f'postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}'
-    return create_engine(db_url)
+    use_sqlite = os.getenv('USE_SQLITE', 'false').lower() == 'true'
 
+    if use_sqlite:
+        # Use SQLite local file
+        db_url = 'sqlite:///vector_db.sqlite'
+    else:
+        # Use PostgreSQL with environment variables
+        db_user = os.getenv('POSTGRES_USER', 'postgres')
+        db_password = os.getenv('POSTGRES_PASSWORD', 'postgres')
+        db_host = os.getenv('POSTGRES_HOST', 'localhost')
+        db_port = os.getenv('POSTGRES_PORT', '5432')
+        db_name = os.getenv('POSTGRES_DB', 'trading_data')
+        db_url = f'postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}'
+
+    return create_engine(db_url, echo=False)
 
 def init_database():
     """Initialize the database (create tables, keys, and indices if they do not exist)"""
