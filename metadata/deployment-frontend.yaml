@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: snp500-frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: snp500-frontend
+  template:
+    metadata:
+      labels:
+        app: snp500-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: <your-frontend-image>:latest
+          ports:
+            - containerPort: 3000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: snp500-frontend
+spec:
+  selector:
+    app: snp500-frontend
+  ports:
+    - protocol: TCP
+      port: 3000
+      targetPort: 3000

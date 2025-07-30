@@ -32,9 +32,9 @@ echo "To create a postgres container with pgvector extension run the following:
   -d ankane/pgvector:latest
   "
   
-echo "To start an already existing docker run: docker start sec_db (or your container name)
+echo "To start an already existing docker run: docker start sec_db (or your container name)"
 
-echo "Acitavate the Postgres shell:
+echo "Activate the Postgres shell:
 docker exec -it $(docker ps -qf ancestor=ankane/pgvector:latest) psql -U postgres -d trading_data
 "
 
