@@ -4,11 +4,12 @@ metadata:
   name: snp500-ingress
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /$1
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
 spec:
   ingressClassName: alb
   rules:
-    - host: <your-domain>
-      http:
+    - http:
         paths:
           - path: /(api.*)
             pathType: Prefix
