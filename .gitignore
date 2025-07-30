@@ -22,6 +22,7 @@ yarn-error.log*
 # React build outputs
 static/js/dist/bundle.js
 static/js/dist/bundle.js.LICENSE.txt
+frontend/build/*
 
 # macOS
 .DS_Store
@@ -42,6 +43,12 @@ logs/
 # Database files
 data/stock_prices.db
 trading_data.db
+eodhd_data/
+*.sqlite
+
+# Ignore FAISS index and mapping files
+*.bin
+*.pkl
 
 # Simulation results
 results/ 
