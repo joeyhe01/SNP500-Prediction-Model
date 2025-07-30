@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: <your-frontend-image>:latest
+          image: 694409028280.dkr.ecr.us-east-1.amazonaws.com/snp500-frontend:latest
           ports:
             - containerPort: 3000
 ---

@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: <your-backend-image>:latest
+          image: 694409028280.dkr.ecr.us-east-1.amazonaws.com/snp500-backend:latest
           ports:
             - containerPort: 5001
           env:
@@ -29,11 +29,11 @@ spec:
                   name: snp500-db-secret
                   key: POSTGRES_PASSWORD
             - name: POSTGRES_HOST
-              value: <your-rds-endpoint>
+              value: "w210-snp500.cc14g6q8i9nn.us-east-1.rds.amazonaws.com"
             - name: POSTGRES_PORT
               value: "5432"
             - name: POSTGRES_DB
-              value: <your-db-name>
+              value: "postgres"
 ---
 apiVersion: v1
 kind: Service
