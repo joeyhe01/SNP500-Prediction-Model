@@ -356,11 +356,15 @@ Example response format:
         # Analyze sentiment for each article and store in database
         ticker_sentiment_counts = defaultdict(lambda: {'positive': 0, 'negative': 0, 'neutral': 0})
         
-        if self.debug:
-            processed_articles = 0
-            total_ticker_sentiment_pairs = 0
+        # Progress tracking variables
+        processed_articles = 0
+        total_ticker_sentiment_pairs = 0
+        total_articles = len(relevant_news)
         
-        for news_item in relevant_news:
+        if self.debug:
+            print(f"Starting sentiment analysis for {total_articles} articles...")
+        
+        for i, news_item in enumerate(relevant_news, 1):
             # Use LLM to analyze sentiment and extract tickers
             ticker_sentiments, similar_faiss_ids = self.analyze_news_sentiment(news_item.title, news_item.summary)
             
@@ -374,16 +378,26 @@ Example response format:
                     sentiment = ticker_sentiment['sentiment']
                     ticker_sentiment_counts[ticker][sentiment] += 1
                 
+                processed_articles += 1
+                total_ticker_sentiment_pairs += len(ticker_sentiments)
+                
                 if self.debug:
-                    processed_articles += 1
-                    total_ticker_sentiment_pairs += len(ticker_sentiments)
                     tickers_found = [ts['ticker'] for ts in ticker_sentiments]
                     sentiments_found = [ts['sentiment'] for ts in ticker_sentiments]
                     print(f"  {news_item.title[:80]}... -> {list(zip(tickers_found, sentiments_found))}")
+            else:
+                # Still count articles without ticker sentiments
+                processed_articles += 1
+            
+            # Progress logging every 10 articles
+            if i % 10 == 0 or i == total_articles:
+                progress_pct = (i / total_articles) * 100
+                print(f"Progress: {i}/{total_articles} articles analyzed ({progress_pct:.1f}%), {total_ticker_sentiment_pairs} sentiment pairs created")
         
-        if self.debug:
-            print(f"\nProcessed {processed_articles} articles with {total_ticker_sentiment_pairs} ticker-sentiment pairs")
-            print(f"Unique tickers found: {len(ticker_sentiment_counts)}")
+        print(f"\nCompleted sentiment analysis:")
+        print(f"  Processed: {processed_articles} articles")
+        print(f"  Created: {total_ticker_sentiment_pairs} ticker-sentiment pairs")
+        print(f"  Unique tickers found: {len(ticker_sentiment_counts)}")
         
         # Calculate net sentiment (positive - negative) for each ticker
         ticker_net_sentiment = {}
