@@ -20,7 +20,12 @@ class StockSimulation:
         if model_class == BaseSentimentModel:
             self.model = model_class(debug=debug)
         else:
-            self.model = model_class()
+            # For LLMSentimentModel, pass debug parameter and enable multithreading
+            try:
+                self.model = model_class(debug=debug, max_workers=6)  # Use 6 threads for faster processing
+            except TypeError:
+                # Fallback for models that don't support max_workers parameter
+                self.model = model_class(debug=debug)
         self.db_session = get_db_session()
         self.simulation_id = None  # Will be set when simulation starts
         self.portfolio_value = 100000  # Starting with $100k

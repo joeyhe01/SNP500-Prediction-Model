@@ -1,9 +1,11 @@
 import os
 import json
 import time
+import threading
 from typing import List, Dict, Tuple
 from datetime import datetime, timedelta
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from openai import OpenAI
 import openai
 from models.database import get_db_session, News, NewsSentiment
@@ -16,10 +18,12 @@ from models.vector_db import search_news, initialize_vector_search
 logger = logging.getLogger(__name__)
 
 class LLMSentimentModel:
-    def __init__(self, debug=False):
+    def __init__(self, debug=False, max_workers=8):
         """Initialize the LLM sentiment model with OpenAI client"""
         self.debug = debug
         self.session = get_db_session()
+        self.max_workers = min(max_workers, 8)  # Cap at 8 to prevent resource exhaustion
+        self.analysis_lock = threading.Lock()  # For thread-safe database operations
         
         # Initialize OpenAI client
         api_key = os.getenv("OPENAI_API_KEY")
@@ -320,6 +324,29 @@ Example response format:
             print(f"Error storing sentiment analysis: {e}")
             self.session.rollback()
     
+    def _analyze_single_article(self, news_item, date, simulation_id):
+        """Analyze sentiment for a single article (thread worker function)"""
+        try:
+            # Use LLM to analyze sentiment and extract tickers
+            ticker_sentiments, similar_faiss_ids = self.analyze_news_sentiment(news_item.title, news_item.summary)
+            
+            if ticker_sentiments:
+                # Store in database with simulation_id and similar article IDs
+                # Use lock to ensure thread-safe database operations
+                with self.analysis_lock:
+                    self.store_sentiment_analysis(simulation_id, date, news_item, ticker_sentiments, similar_faiss_ids)
+                
+                if self.debug:
+                    tickers_found = [ts['ticker'] for ts in ticker_sentiments]
+                    sentiments_found = [ts['sentiment'] for ts in ticker_sentiments]
+                    print(f"  {news_item.title[:80]}... -> {list(zip(tickers_found, sentiments_found))}")
+            
+            return ticker_sentiments
+            
+        except Exception as e:
+            print(f"Error analyzing article '{news_item.title[:50]}...': {e}")
+            return []
+    
     def get_trading_signals(self, date, simulation_id):
         """
         Get trading signals for a specific date based on news sentiment
@@ -362,37 +389,84 @@ Example response format:
         total_articles = len(relevant_news)
         
         if self.debug:
-            print(f"Starting sentiment analysis for {total_articles} articles...")
+            print(f"Starting sentiment analysis for {total_articles} articles using {self.max_workers} threads...")
         
-        for i, news_item in enumerate(relevant_news, 1):
-            # Use LLM to analyze sentiment and extract tickers
-            ticker_sentiments, similar_faiss_ids = self.analyze_news_sentiment(news_item.title, news_item.summary)
-            
-            if ticker_sentiments:
-                # Store in database with simulation_id and similar article IDs
-                self.store_sentiment_analysis(simulation_id, date, news_item, ticker_sentiments, similar_faiss_ids)
+        start_time = time.time()
+        
+        # Use ThreadPoolExecutor to process articles in parallel
+        try:
+            with ThreadPoolExecutor(max_workers=self.max_workers, thread_name_prefix="sentiment_") as executor:
+                # Submit all articles for processing
+                future_to_article = {
+                    executor.submit(self._analyze_single_article, news_item, date, simulation_id): news_item 
+                    for news_item in relevant_news
+                }
                 
-                # Count sentiments by ticker
-                for ticker_sentiment in ticker_sentiments:
-                    ticker = ticker_sentiment['ticker']
-                    sentiment = ticker_sentiment['sentiment']
-                    ticker_sentiment_counts[ticker][sentiment] += 1
-                
-                processed_articles += 1
-                total_ticker_sentiment_pairs += len(ticker_sentiments)
-                
-                if self.debug:
-                    tickers_found = [ts['ticker'] for ts in ticker_sentiments]
-                    sentiments_found = [ts['sentiment'] for ts in ticker_sentiments]
-                    print(f"  {news_item.title[:80]}... -> {list(zip(tickers_found, sentiments_found))}")
-            else:
-                # Still count articles without ticker sentiments
-                processed_articles += 1
-            
-            # Progress logging every 10 articles
-            if i % 10 == 0 or i == total_articles:
-                progress_pct = (i / total_articles) * 100
-                print(f"Progress: {i}/{total_articles} articles analyzed ({progress_pct:.1f}%), {total_ticker_sentiment_pairs} sentiment pairs created")
+                # Collect results as they complete
+                completed_count = 0
+                for future in as_completed(future_to_article):
+                    try:
+                        ticker_sentiments = future.result(timeout=60)  # Add timeout
+                        
+                        if ticker_sentiments:
+                            # Count sentiments by ticker
+                            for ticker_sentiment in ticker_sentiments:
+                                ticker = ticker_sentiment['ticker']
+                                sentiment = ticker_sentiment['sentiment']
+                                ticker_sentiment_counts[ticker][sentiment] += 1
+                            
+                            processed_articles += 1
+                            total_ticker_sentiment_pairs += len(ticker_sentiments)
+                        else:
+                            # Still count articles without ticker sentiments
+                            processed_articles += 1
+                        
+                        completed_count += 1
+                        
+                        # Progress logging every 10 articles
+                        if completed_count % 10 == 0 or completed_count == total_articles:
+                            progress_pct = (completed_count / total_articles) * 100
+                            print(f"Progress: {completed_count}/{total_articles} articles analyzed ({progress_pct:.1f}%), {total_ticker_sentiment_pairs} sentiment pairs created")
+                            
+                    except Exception as e:
+                        completed_count += 1
+                        print(f"Error processing article: {e}")
+                        continue
+                        
+        except Exception as e:
+            print(f"ThreadPoolExecutor error: {e}")
+            # Fallback to sequential processing if threading fails
+            print("Falling back to sequential processing...")
+            for i, news_item in enumerate(relevant_news, 1):
+                try:
+                    ticker_sentiments = self._analyze_single_article(news_item, date, simulation_id)
+                    
+                    if ticker_sentiments:
+                        # Count sentiments by ticker
+                        for ticker_sentiment in ticker_sentiments:
+                            ticker = ticker_sentiment['ticker']
+                            sentiment = ticker_sentiment['sentiment']
+                            ticker_sentiment_counts[ticker][sentiment] += 1
+                        
+                        processed_articles += 1
+                        total_ticker_sentiment_pairs += len(ticker_sentiments)
+                    else:
+                        processed_articles += 1
+                    
+                    # Progress logging every 10 articles
+                    if i % 10 == 0 or i == total_articles:
+                        progress_pct = (i / total_articles) * 100
+                        print(f"Progress: {i}/{total_articles} articles analyzed ({progress_pct:.1f}%), {total_ticker_sentiment_pairs} sentiment pairs created")
+                        
+                except Exception as e:
+                    print(f"Error in sequential processing: {e}")
+                    continue
+        
+        end_time = time.time()
+        processing_time = end_time - start_time
+        
+        print(f"Processing time: {processing_time:.2f} seconds ({processing_time/total_articles:.2f}s per article)")
+        print(f"Effective rate: {total_articles * 60 / processing_time:.1f} articles per minute")
         
         print(f"\nCompleted sentiment analysis:")
         print(f"  Processed: {processed_articles} articles")
