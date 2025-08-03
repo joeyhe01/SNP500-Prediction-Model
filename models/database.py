@@ -1,6 +1,7 @@
-from sqlalchemy import create_engine, Column, String, Float, Date, UniqueConstraint, Integer, DateTime, Index, Text, JSON
+from sqlalchemy import create_engine, Column, String, Float, Date, UniqueConstraint, Integer, DateTime, Index, Text, JSON, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from pgvector.sqlalchemy import Vector
 import os
 from datetime import datetime
 
@@ -113,6 +114,32 @@ class RealtimePrediction(Base):
         return f"<RealtimePrediction(id={self.id}, timestamp='{self.timestamp}', market_sentiment={self.market_sentiment_score})>"
 
 
+class SECFilings(Base):
+    __tablename__ = 'sec_filings'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    accession_number = Column(String, nullable=False, index=True)
+    chunk_id = Column(Integer, nullable=False)
+    text = Column(Text, nullable=False)
+    company_name = Column(String)
+    filing_date = Column(String, index=True)
+    form_type = Column(String)
+    cik = Column(String)
+    source_file = Column(String)
+    metadata_json = Column(JSON)
+    embedding = Column(Vector(384))  # FAISS-style vector
+
+    __table_args__ = (
+        Index('idx_sec_filings_filing_date', 'filing_date'),
+    )
+
+    def __repr__(self):
+        return (
+            f"<SECFilings(id={self.id}, accession_number='{self.accession_number}', "
+            f"chunk_id={self.chunk_id}, company='{self.company_name}', "
+            f"filing_date='{self.filing_date}', form_type='{self.form_type}')>"
+        )                                  
+
 class NewsFaiss(Base):
     __tablename__ = 'news_faiss'
     
@@ -122,23 +149,55 @@ class NewsFaiss(Base):
     title = Column(String, nullable=False)
     description = Column(String, nullable=False)
     ticker_metadata = Column(JSON, nullable=False)
-    
-    
-    
-# Database setup
-def get_db_session():
-    """Create and return a database session"""
-    # Create SQLite database in root directory
-    engine = create_engine('sqlite:///trading_data.db')
-    Base.metadata.create_all(engine)
-    
-    # Create session
-    Session = sessionmaker(bind=engine)
-    return Session()
 
+
+_engine = None
+_Session = None
+_db_initialized = False
+
+#def get_engine():
+#    db_user = os.getenv('POSTGRES_USER', 'postgres')
+#    db_password = os.getenv('POSTGRES_PASSWORD', 'postgres')
+#    db_host = os.getenv('POSTGRES_HOST', 'localhost')
+#    db_port = os.getenv('POSTGRES_PORT', '5432')
+#    db_name = os.getenv('POSTGRES_DB', 'trading_data')
+#    db_url = f'postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}'
+#    return create_engine(db_url)
+# Detect SQLite override
+def get_engine():
+    use_sqlite = os.getenv('USE_SQLITE', 'false').lower() == 'true'
+
+    if use_sqlite:
+        # Use SQLite local file
+        db_url = 'sqlite:///vector_db.sqlite'
+    else:
+        # Use PostgreSQL with environment variables
+        db_user = os.getenv('POSTGRES_USER', 'postgres')
+        db_password = os.getenv('POSTGRES_PASSWORD', 'postgres')
+        db_host = os.getenv('POSTGRES_HOST', 'localhost')
+        db_port = os.getenv('POSTGRES_PORT', '5432')
+        db_name = os.getenv('POSTGRES_DB', 'trading_data')
+        db_url = f'postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}'
+
+    return create_engine(db_url, echo=False)
 
 def init_database():
-    """Initialize the database"""
-    session = get_db_session()
-    session.close()
-    print("Database initialized successfully") 
+    """Initialize the database (create tables, keys, and indices if they do not exist)"""
+    global _db_initialized, _engine
+    if not _db_initialized:
+        if _engine is None:
+            _engine = get_engine()
+        Base.metadata.create_all(_engine)  # Idempotent
+        _db_initialized = True
+        print("Database initialized successfully")
+
+def get_db_session():
+    """Create and return a database session. Initializes DB schema only once per process."""
+    global _engine, _Session
+    if _engine is None:
+        _engine = get_engine()
+    if _Session is None:
+        _Session = sessionmaker(bind=_engine)
+    # Ensure DB is initialized only once
+    init_database()
+    return _Session()

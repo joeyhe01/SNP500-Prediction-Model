@@ -1,5 +1,227 @@
 #!/usr/bin/env python3
 """
+FAISS Vector Database Backfill Script - Adapted for new JSON format
+
+Processes financial news JSON files where each record has:
+- date (ISO8601 string with timezone)
+- title
+- content (instead of description)
+- symbols (instead of mentioned_companies)
+No price data, so ticker price changes are skipped.
+
+Creates embeddings for title+content and stores in FAISS vector DB.
+"""
+
+import json
+import os
+import pickle
+import numpy as np
+from typing import List, Dict, Any, Tuple
+import faiss
+from sentence_transformers import SentenceTransformer
+from dateutil import parser  # Robust ISO8601 datetime parsing
+from models.database import get_db_session, NewsFaiss
+from sqlalchemy.orm import Session
+
+
+class VectorDatabase:
+    """FAISS Vector Database manager"""
+
+    def __init__(self, model_name: str = 'all-MiniLM-L6-v2', dimension: int = 384):
+        self.model_name = model_name
+        self.dimension = dimension
+        self.model = SentenceTransformer(model_name)
+        self.index = faiss.IndexHNSWFlat(dimension, 32)
+        self.index.hnsw.efConstruction = 200
+        self.index.hnsw.efSearch = 128
+        self.id_mapping = {}
+        self.next_faiss_id = 0
+
+    def add_embeddings(self, texts: List[str], db_ids: List[int]) -> List[int]:
+        if not texts:
+            return []
+
+        embeddings = self.model.encode(texts, normalize_embeddings=True)
+        embeddings = embeddings.astype('float32')
+
+        faiss_ids = []
+        for embedding, db_id in zip(embeddings, db_ids):
+            faiss_id = self.next_faiss_id
+            self.index.add(np.array([embedding]))
+            self.id_mapping[faiss_id] = db_id
+            faiss_ids.append(faiss_id)
+            self.next_faiss_id += 1
+
+        return faiss_ids
+
+    def save(self, index_path: str = 'faiss_index.bin', mapping_path: str = 'faiss_mapping.pkl'):
+        faiss.write_index(self.index, index_path)
+        with open(mapping_path, 'wb') as f:
+            pickle.dump({
+                'id_mapping': self.id_mapping,
+                'next_faiss_id': self.next_faiss_id,
+                'model_name': self.model_name,
+                'dimension': self.dimension
+            }, f)
+        print(f"FAISS index saved to {index_path}")
+        print(f"ID mapping saved to {mapping_path}")
+
+    def load(self, index_path: str = 'faiss_index.bin', mapping_path: str = 'faiss_mapping.pkl') -> bool:
+        if not os.path.exists(index_path) or not os.path.exists(mapping_path):
+            print(f"FAISS files not found. Starting with empty index.")
+            return False
+
+        self.index = faiss.read_index(index_path)
+        with open(mapping_path, 'rb') as f:
+            data = pickle.load(f)
+            self.id_mapping = data['id_mapping']
+            self.next_faiss_id = data['next_faiss_id']
+        print(f"FAISS index loaded from {index_path}")
+        print(f"Loaded {len(self.id_mapping)} embeddings")
+        return True
+
+    def search(self, query: str, k: int = 10) -> List[Tuple[int, float]]:
+        if self.index.ntotal == 0:
+            return []
+
+        query_embedding = self.model.encode([query], normalize_embeddings=True)
+        query_embedding = query_embedding.astype('float32')
+
+        distances, indices = self.index.search(query_embedding, k)
+        results = []
+        for distance, idx in zip(distances[0], indices[0]):
+            if idx in self.id_mapping:
+                db_id = self.id_mapping[idx]
+                similarity = 1.0 - distance
+                results.append((db_id, similarity))
+        return results
+
+
+def calculate_ticker_price_changes(record: Dict[str, Any]) -> Dict[str, float]:
+    # No price data in the new JSON format, so return empty dict
+    return {}
+
+
+def process_financial_news_file(file_path: str, vector_db: VectorDatabase, session: Session) -> int:
+    print(f"Processing {file_path}...")
+
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            data = [data]  # normalize single record to list
+        print(f"  Loaded {len(data)} records from file")
+    except Exception as e:
+        print(f"  Error loading file: {e}")
+        return 0
+
+    records_to_add = []
+    texts_to_embed = []
+    db_ids_for_embedding = []
+    skipped_count = 0
+
+    for i, record in enumerate(data):
+        title = record.get('title') or ''
+        description = record.get('content') or ''
+        date_publish = record.get('date')
+
+        title = title.strip()
+        description = description.strip()
+
+        if not title or not description or not date_publish:
+            skipped_count += 1
+            continue
+
+        try:
+            parsed_date = parser.isoparse(date_publish)
+        except Exception as e:
+            print(f"  Could not parse date '{date_publish}': {e}")
+            skipped_count += 1
+            continue
+
+        ticker_metadata = calculate_ticker_price_changes(record)
+
+        news_faiss = NewsFaiss(
+            faiss_id=0,
+            date_publish=parsed_date,
+            title=title,
+            description=description,
+            ticker_metadata=ticker_metadata
+        )
+        session.add(news_faiss)
+        session.flush()  # Get DB id
+
+        text_to_embed = f"{title} {description}"
+        texts_to_embed.append(text_to_embed)
+        db_ids_for_embedding.append(news_faiss.id)
+        records_to_add.append(news_faiss)
+
+        if (i + 1) % 1000 == 0:
+            print(f"  Processed {i + 1} records...")
+
+    if texts_to_embed:
+        faiss_ids = vector_db.add_embeddings(texts_to_embed, db_ids_for_embedding)
+        for news_faiss, faiss_id in zip(records_to_add, faiss_ids):
+            news_faiss.faiss_id = faiss_id
+
+    session.commit()
+
+    print(f"  ✓ Successfully processed {len(records_to_add)} records")
+    if skipped_count > 0:
+        print(f"  ⚠ Skipped {skipped_count} records (missing required fields or bad dates)")
+    return len(records_to_add)
+
+
+def backfill_vector_database():
+    print("Starting FAISS vector database backfill...")
+
+    vector_db = VectorDatabase()
+    vector_db.load()
+
+    session = get_db_session()
+    existing_count = session.query(NewsFaiss).count()
+
+    if existing_count > 0:
+        print(f"Found {existing_count} existing records in database.")
+        response = input("Do you want to clear existing data and rebuild? (y/N): ")
+        if response.lower() == 'y':
+            session.query(NewsFaiss).delete()
+            session.commit()
+            vector_db = VectorDatabase()
+            print("Cleared existing data.")
+        else:
+            print("Keeping existing data and appending new records.")
+
+    data_dir = 'eodhd_data'
+    total_processed = 0
+
+    json_files = [f for f in os.listdir(data_dir) if f.endswith('.json')]
+    json_files.sort()
+
+    for filename in json_files:
+        file_path = os.path.join(data_dir, filename)
+        try:
+            count = process_financial_news_file(file_path, vector_db, session)
+            total_processed += count
+        except Exception as e:
+            print(f"Error processing {filename}: {e}")
+            continue
+
+    vector_db.save()
+    session.close()
+
+    print("\nBackfill complete!")
+    print(f"Total records processed: {total_processed}")
+    print(f"FAISS index size: {vector_db.index.ntotal}")
+    print(f"Vector database saved to disk.")
+
+
+if __name__ == "__main__":
+    backfill_vector_database()
+
+'''
+#!/usr/bin/env python3
+"""
 FAISS Vector Database Backfill Script
 
 This script processes financial news data from 2017-2023, creates embeddings
@@ -292,11 +514,13 @@ def backfill_vector_database():
             print("Keeping existing data and appending new records.")
     
     # Process all financial news files
-    data_dir = 'financial-news-dataset/data'
+    #data_dir = 'financial-news-dataset/data'
+    data_dir = 'eodhd_data'
     total_processed = 0
     
     # Get all JSON files and sort them by year
-    json_files = [f for f in os.listdir(data_dir) if f.endswith('_processed.json')]
+    #json_files = [f for f in os.listdir(data_dir) if f.endswith('_processed.json')]
+    json_files = [f for f in os.listdir(data_dir) if f.endswith('.json')]
     json_files.sort()
     
     for filename in json_files:
@@ -321,3 +545,4 @@ def backfill_vector_database():
 
 if __name__ == "__main__":
     backfill_vector_database()
+'''

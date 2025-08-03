@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from models.base_sentiment_model import BaseSentimentModel
-from models.database import get_db_session, Simulation, DailyRecap, NewsSentiment, StockPrice
+from models.database import get_db_session, init_database, Simulation, DailyRecap, NewsSentiment
+from data_fetchers.stock_price_fetcher import StockPriceFetcher
 from sqlalchemy import and_
 from sqlalchemy.orm.attributes import flag_modified
 import pandas as pd
@@ -20,12 +21,8 @@ class StockSimulation:
         if model_class == BaseSentimentModel:
             self.model = model_class(debug=debug)
         else:
-            # For LLMSentimentModel, pass debug parameter and enable multithreading
-            try:
-                self.model = model_class(debug=debug, max_workers=6)  # Use 6 threads for faster processing
-            except TypeError:
-                # Fallback for models that don't support max_workers parameter
-                self.model = model_class(debug=debug)
+            self.model = model_class()
+        self.price_fetcher = StockPriceFetcher()
         self.db_session = get_db_session()
         self.simulation_id = None  # Will be set when simulation starts
         self.portfolio_value = 100000  # Starting with $100k
@@ -99,41 +96,6 @@ class StockSimulation:
             current_date += timedelta(days=1)
             
         return trading_days
-    
-    def get_stock_price(self, ticker, date):
-        """
-        Get stock price data for a specific ticker and date from the database
-        
-        Args:
-            ticker: Stock ticker symbol (e.g., 'AAPL')
-            date: Date object
-            
-        Returns:
-            Dictionary with price data or None if not found
-        """
-        try:
-            stock_price = self.db_session.query(StockPrice).filter(
-                and_(
-                    StockPrice.ticker == ticker,
-                    StockPrice.date == date
-                )
-            ).first()
-            
-            if stock_price:
-                return {
-                    'open': stock_price.open_price,
-                    'close': stock_price.close_price,
-                    'high': stock_price.high_price,
-                    'low': stock_price.low_price,
-                    'volume': stock_price.volume
-                }
-            else:
-                print(f"Warning: No price data found for {ticker} on {date}")
-                return None
-                
-        except Exception as e:
-            print(f"Error fetching stock price for {ticker} on {date}: {e}")
-            return None
     
     def store_daily_recap(self, date, starting_money, ending_money, positions_extra_data):
         """
@@ -213,7 +175,7 @@ class StockSimulation:
         
         # Open long positions at market open
         for ticker in signals['long']:
-            price_data = self.get_stock_price(ticker, date)
+            price_data = self.price_fetcher.get_stock_price(ticker, date)
             if price_data and price_data['open'] > 0:
                 shares = position_size / price_data['open']
                 self.positions['long'][ticker] = {
@@ -253,7 +215,7 @@ class StockSimulation:
         
         # Open short positions at market open
         for ticker in signals['short']:
-            price_data = self.get_stock_price(ticker, date)
+            price_data = self.price_fetcher.get_stock_price(ticker, date)
             if price_data and price_data['open'] > 0:
                 shares = position_size / price_data['open']
                 self.positions['short'][ticker] = {
@@ -320,7 +282,7 @@ class StockSimulation:
         
         # Close long positions at market close
         for ticker, position in list(self.positions['long'].items()):
-            price_data = self.get_stock_price(ticker, date)
+            price_data = self.price_fetcher.get_stock_price(ticker, date)
             if price_data and price_data['close'] > 0:
                 entry_price = position['entry_price']
                 exit_price = price_data['close']
@@ -366,7 +328,7 @@ class StockSimulation:
         
         # Close short positions at market close
         for ticker, position in list(self.positions['short'].items()):
-            price_data = self.get_stock_price(ticker, date)
+            price_data = self.price_fetcher.get_stock_price(ticker, date)
             if price_data and price_data['close'] > 0:
                 entry_price = position['entry_price']
                 exit_price = price_data['close']
@@ -612,8 +574,8 @@ class StockSimulation:
         Compare performance to S&P 500
         """
         # For demonstration, we'll use SPY as a proxy for S&P 500
-        spy_start = self.get_stock_price('SPY', start_date)
-        spy_end = self.get_stock_price('SPY', end_date)
+        spy_start = self.price_fetcher.get_stock_price('SPY', start_date)
+        spy_end = self.price_fetcher.get_stock_price('SPY', end_date)
         
         if spy_start and spy_end:
             sp500_return = ((spy_end['close'] - spy_start['open']) / spy_start['open']) * 100
@@ -636,6 +598,7 @@ class StockSimulation:
         """Clean up resources"""
         if hasattr(self.model, 'close'):
             self.model.close()
+        self.price_fetcher.close()
         self.db_session.close()
 
     def close_all_positions(self, date):

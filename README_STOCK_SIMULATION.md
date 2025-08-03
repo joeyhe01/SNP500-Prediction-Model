@@ -7,7 +7,7 @@ This system implements a RAG-based approach for stock prediction using news sent
 The system consists of several key components:
 
 1. **Database Layer** (`models/database.py`)
-   - SQLite database for caching stock price data and news articles
+   - PostgreSQL database for caching stock price data and news articles
    - News table with indexed timestamp queries for efficient retrieval
    - Reduces API calls to Alpha Vantage
 
@@ -185,4 +185,4 @@ class YourCustomModel:
 - Add risk management (stop losses, position sizing)
 - Expand ticker coverage with better entity recognition
 - Include sector/market analysis
-- Real-time trading capabilities 
+- Real-time trading capabilities

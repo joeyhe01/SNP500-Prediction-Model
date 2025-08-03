@@ -17,6 +17,9 @@ from datetime import datetime, timedelta
 import json
 import logging
 from sqlalchemy.orm import aliased
+import time
+from realtime.news_aggregator import RealtimeNewsAggregator
+from realtime.realtime_predictor import RealtimeTradingPredictor
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -625,8 +628,6 @@ def delete_simulation(simulation_id):
 def fetch_realtime_data():
     """Fetch fresh news data from APIs and store in database"""
     try:
-        from realtime.news_aggregator import RealtimeNewsAggregator
-        
         # Get custom time range from request if provided
         data = request.get_json() or {}
         start_time = None
@@ -683,8 +684,6 @@ def fetch_realtime_data():
 def fetch_finnhub_data():
     """Fetch news data from Finnhub API only"""
     try:
-        from realtime.news_aggregator import RealtimeNewsAggregator
-        
         # Get custom time range from request if provided
         data = request.get_json() or {}
         start_time = None
@@ -740,8 +739,6 @@ def fetch_finnhub_data():
 def fetch_newsapi_ai_data():
     """Fetch news data from NewsAPI.ai only"""
     try:
-        from realtime.news_aggregator import RealtimeNewsAggregator
-        
         # Get custom time range from request if provided
         data = request.get_json() or {}
         start_time = None
@@ -801,8 +798,6 @@ def fetch_newsapi_ai_data():
 def generate_realtime_prediction():
     """Generate a new realtime trading prediction using only database data"""
     try:
-        from realtime.realtime_predictor import RealtimeTradingPredictor
-        
         # Get custom time range from request if provided
         data = request.get_json() or {}
         start_time = None
@@ -918,7 +913,6 @@ def get_realtime_predictions():
 @app.route('/api/realtime/prediction/<int:prediction_id>/ticker-sentiment-summary')
 def get_realtime_ticker_sentiment_summary(prediction_id):
     """Get efficient ticker sentiment summary for a realtime prediction"""
-    import time
     start_time_perf = time.time()
     
     session = get_db_session()
@@ -1396,7 +1390,6 @@ def get_realtime_data_status():
         total_news = session.query(News).count()
         
         # Get time range that would be used for prediction
-        from realtime.news_aggregator import RealtimeNewsAggregator
         aggregator = RealtimeNewsAggregator()
         start_time, end_time = aggregator.get_time_range()
         aggregator.close()

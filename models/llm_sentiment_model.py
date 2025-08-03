@@ -26,10 +26,9 @@ class LLMSentimentModel:
         self.analysis_lock = threading.Lock()  # For thread-safe database operations
         
         # Initialize OpenAI client
-        api_key = os.getenv("OPENAI_API_KEY")
-        # api_key = "put key here"
-        if not api_key:
-            raise ValueError("OPENAI_API_KEY environment variable is required")
+        api_key = os.environ.get("OPENAI_API_KEY", "put key here")
+        if not api_key or api_key == "put key here":
+            raise ValueError("OPENAI_API_KEY environment variable is required or must be set in code")
         
         self.client = OpenAI(api_key=api_key)
         
@@ -520,4 +519,4 @@ Example response format:
     def close(self):
         """Clean up resources"""
         if self.session:
-            self.session.close() 
+            self.session.close()
