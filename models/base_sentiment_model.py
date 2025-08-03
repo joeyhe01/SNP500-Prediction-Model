@@ -428,11 +428,17 @@ class BaseSentimentModel:
         # Analyze sentiment for each article and store in database
         ticker_sentiment_counts = defaultdict(lambda: {'positive': 0, 'negative': 0, 'neutral': 0})
         
+        # Progress tracking variables
+        processed_articles = 0
+        sentiment_pairs_created = 0
+        total_articles = len(relevant_news)
+        
         if self.debug:
             ticker_extraction_stats = defaultdict(int)
             no_ticker_count = 0
+            print(f"Starting sentiment analysis for {total_articles} articles...")
         
-        for news_item in relevant_news:
+        for i, news_item in enumerate(relevant_news, 1):
             # Extract ticker from headline
             ticker = self.extract_ticker_from_headline(news_item.title)
             
@@ -446,12 +452,26 @@ class BaseSentimentModel:
                 # Count sentiments by type
                 ticker_sentiment_counts[ticker][sentiment] += 1
                 
+                processed_articles += 1
+                sentiment_pairs_created += 1
+                
                 if self.debug:
                     ticker_extraction_stats[ticker] += 1
                     print(f"  {news_item.title[:80]}... -> {ticker} ({sentiment})")
             else:
+                processed_articles += 1
                 if self.debug:
                     no_ticker_count += 1
+            
+            # Progress logging every 10 articles
+            if i % 10 == 0 or i == total_articles:
+                progress_pct = (i / total_articles) * 100
+                print(f"Progress: {i}/{total_articles} articles analyzed ({progress_pct:.1f}%), {sentiment_pairs_created} sentiment pairs created")
+        
+        print(f"\nCompleted sentiment analysis:")
+        print(f"  Processed: {processed_articles} articles")
+        print(f"  Created: {sentiment_pairs_created} ticker-sentiment pairs")
+        print(f"  Unique tickers found: {len(ticker_sentiment_counts)}")
         
         if self.debug:
             print(f"\nTicker extraction stats:")
