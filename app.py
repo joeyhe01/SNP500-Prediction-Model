@@ -32,6 +32,15 @@ def serve():
     """Serve the React app"""
     return send_from_directory(app.template_folder, 'index.html')
 
+# Serve React App
+@app.route('/api/health')
+def serve():
+    """Return a basic health check"""
+    return jsonify({
+            'success': True,
+            'status': 'OK'
+        }), 200
+
 # Vector Search Endpoints (must be before catch-all route)
 @app.route('/api/vector/search', methods=['POST'])
 def vector_search_endpoint():
