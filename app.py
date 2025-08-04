@@ -34,7 +34,7 @@ def serve():
 
 # Serve React App
 @app.route('/api/health')
-def serve():
+def health():
     """Return a basic health check"""
     return jsonify({
             'success': True,
