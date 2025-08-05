@@ -359,11 +359,23 @@ def get_simulation_details(simulation_id):
         # Get daily recap data
         daily_data = session.query(DailyRecap).filter_by(simulation_id=simulation_id).order_by(asc(DailyRecap.date)).all()
         
+        # Get simulation metadata and flatten metrics like the simulations list API does
+        extra_data = simulation.extra_data or {}
+        metrics = extra_data.get('metrics', {})
+        
+        # Flatten metrics to top level for frontend compatibility
+        flattened_extra_data = dict(extra_data)
+        flattened_extra_data.update({
+            'sharpe_ratio': metrics.get('sharpe_ratio', 0),
+            'max_drawdown_pct': metrics.get('max_drawdown_pct', 0),
+            'win_rate_pct': metrics.get('win_rate_pct', 0)
+        })
+        
         result = {
             'simulation': {
                 'id': simulation.id,
                 'executed_at': simulation.executed_at.strftime('%Y-%m-%d %H:%M:%S'),
-                'extra_data': simulation.extra_data or {}
+                'extra_data': flattened_extra_data
             },
             'daily_data': []
         }

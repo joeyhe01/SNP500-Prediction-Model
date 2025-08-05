@@ -227,10 +227,7 @@ const NewsItem = ({ item }) => {
     }
   };
 
-  const getSentimentDisplayText = (sentiment, hasAnalysis) => {
-    if (!hasAnalysis) return 'No Analysis';
-    return sentiment || 'Neutral';
-  };
+
 
   return (
     <div className={`news-item ${item.has_analysis ? 'analyzed' : 'not-analyzed'}`}>
@@ -248,11 +245,25 @@ const NewsItem = ({ item }) => {
           )}
         </div>
         <div className="news-sentiment-info">
-          <span className={`sentiment-badge ${getSentimentBadgeClass(item.sentiment)}`}>
-            {getSentimentDisplayText(item.sentiment, item.has_analysis)}
-          </span>
-          {item.identified_ticker && (
-            <span className="ticker-badge">{item.identified_ticker}</span>
+          {item.has_analysis && item.sentiment_data && item.sentiment_data.length > 0 ? (
+            <div className="sentiment-badges-container">
+              {item.sentiment_data.map((sentimentItem, index) => (
+                <div key={index} className="ticker-sentiment-container">
+                  <div className="ticker-sentiment-pair">
+                    <span className="ticker-badge">{sentimentItem.ticker}</span>
+                    <span className={`sentiment-badge ${getSentimentBadgeClass(sentimentItem.sentiment)}`}>
+                      {sentimentItem.sentiment}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="no-sentiment-analysis">
+              <span className="sentiment-badge sentiment-no-analysis">
+                No Analysis
+              </span>
+            </div>
           )}
         </div>
       </div>

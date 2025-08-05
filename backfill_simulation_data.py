@@ -222,8 +222,8 @@ def main():
         # First, fetch stock prices for all tickers for the entire month
         # This is more efficient than daily requests
         print("\n=== FETCHING STOCK PRICE DATA ===")
-        from_date = "2025-06-01"
-        to_date = "2025-06-30"
+        from_date = "2025-07-01"
+        to_date = "2025-07-31"
         
         total_stock_records = 0
         for i, ticker in enumerate(SP500_TICKERS, 1):
@@ -242,8 +242,8 @@ def main():
         total_news_articles = 0
         
         # Date range for the entire month of June 2025
-        from_date = "2025-06-01"
-        to_date = "2025-06-30"
+        from_date = "2025-07-01"
+        to_date = "2025-07-31"
         
         for ticker_idx, ticker in enumerate(SP500_TICKERS, 1):
             print(f"\n[{ticker_idx}/{len(SP500_TICKERS)}] Processing {ticker} for June 2025")
@@ -277,7 +277,7 @@ def main():
             print(f"  Total saved for {ticker}: {ticker_news_count} articles")
             
             # Add a delay between ticker requests to be respectful to API
-            time.sleep(0.3)
+            # time.sleep(0.1)
         
         print(f"\nTotal news articles saved: {total_news_articles}")
         print("\nNews backfill process completed successfully!")
