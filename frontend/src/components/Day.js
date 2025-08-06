@@ -11,6 +11,11 @@ const Day = () => {
   const [dayData, setDayData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  
+  // State for similar articles functionality
+  const [expandedSimilarArticles, setExpandedSimilarArticles] = useState({});
+  const [similarArticlesData, setSimilarArticlesData] = useState({});
+  const [loadingSimilarArticles, setLoadingSimilarArticles] = useState({});
 
   useEffect(() => {
     loadData();
@@ -27,6 +32,42 @@ const Day = () => {
       setError(`Error loading data: ${err.message}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Function to load similar articles for a sentiment record
+  const loadSimilarArticles = async (sentimentId) => {
+    setLoadingSimilarArticles(prev => ({ ...prev, [sentimentId]: true }));
+    
+    try {
+      const response = await axios.get(`/api/sentiment/${sentimentId}/similar_articles`);
+      setSimilarArticlesData(prev => ({ 
+        ...prev, 
+        [sentimentId]: response.data.similar_articles 
+      }));
+    } catch (err) {
+      console.error(`Error loading similar articles for sentiment ${sentimentId}:`, err);
+      setSimilarArticlesData(prev => ({ 
+        ...prev, 
+        [sentimentId]: [] 
+      }));
+    } finally {
+      setLoadingSimilarArticles(prev => ({ ...prev, [sentimentId]: false }));
+    }
+  };
+
+  // Function to toggle similar articles dropdown
+  const toggleSimilarArticles = (sentimentId) => {
+    const isCurrentlyExpanded = expandedSimilarArticles[sentimentId];
+    
+    setExpandedSimilarArticles(prev => ({
+      ...prev,
+      [sentimentId]: !isCurrentlyExpanded
+    }));
+    
+    // Load similar articles if expanding and not already loaded
+    if (!isCurrentlyExpanded && !similarArticlesData[sentimentId]) {
+      loadSimilarArticles(sentimentId);
     }
   };
 
@@ -201,7 +242,14 @@ const Day = () => {
                   return parseTimestamp(b.time_published) - parseTimestamp(a.time_published);
                 })
                 .map((item) => (
-                  <NewsItem key={item.headline_id} item={item} />
+                  <NewsItem 
+                    key={item.headline_id} 
+                    item={item}
+                    expandedSimilarArticles={expandedSimilarArticles}
+                    toggleSimilarArticles={toggleSimilarArticles}
+                    loadingSimilarArticles={loadingSimilarArticles}
+                    similarArticlesData={similarArticlesData}
+                  />
                 ))}
             </div>
           ) : (
@@ -215,7 +263,7 @@ const Day = () => {
   );
 };
 
-const NewsItem = ({ item }) => {
+const NewsItem = ({ item, expandedSimilarArticles, toggleSimilarArticles, loadingSimilarArticles, similarArticlesData }) => {
   const [expanded, setExpanded] = useState(false);
 
   const getSentimentBadgeClass = (sentiment) => {
@@ -225,6 +273,23 @@ const NewsItem = ({ item }) => {
       case 'negative': return 'sentiment-negative';
       default: return 'sentiment-neutral';
     }
+  };
+
+  // Find the first sentiment record that has similar articles data for this article
+  const getSimilarArticlesData = () => {
+    if (!item.sentiment_data || !Array.isArray(item.sentiment_data)) return null;
+    
+    for (const sentiment of item.sentiment_data) {
+      if (sentiment.id && sentiment.similar_news_faiss_ids && 
+          Array.isArray(sentiment.similar_news_faiss_ids) && 
+          sentiment.similar_news_faiss_ids.length > 0) {
+        return {
+          sentimentId: sentiment.id,
+          similarIds: sentiment.similar_news_faiss_ids
+        };
+      }
+    }
+    return null;
   };
 
 
@@ -266,6 +331,71 @@ const NewsItem = ({ item }) => {
             </div>
           )}
         </div>
+        
+        {/* Similar Articles Button - shown once per article */}
+        {(() => {
+          const similarArticlesInfo = getSimilarArticlesData();
+          return similarArticlesInfo && (
+            <div className="article-similar-articles-section">
+              <button 
+                className="similar-articles-toggle"
+                onClick={() => toggleSimilarArticles(similarArticlesInfo.sentimentId)}
+                title="View similar historical articles used for analysis"
+                style={{marginTop: '8px', backgroundColor: '#e3f2fd', border: '1px solid #2196f3', color: '#1976d2'}}
+              >
+                {expandedSimilarArticles[similarArticlesInfo.sentimentId] ? '▼' : '▶'} Similar Articles ({similarArticlesInfo.similarIds.length})
+              </button>
+              
+              {/* Similar Articles Dropdown */}
+              {expandedSimilarArticles[similarArticlesInfo.sentimentId] && (
+                <div className="similar-articles-dropdown">
+                  {loadingSimilarArticles[similarArticlesInfo.sentimentId] ? (
+                    <div className="loading-similar">Loading similar articles...</div>
+                  ) : similarArticlesData[similarArticlesInfo.sentimentId] && similarArticlesData[similarArticlesInfo.sentimentId].length > 0 ? (
+                    <div className="similar-articles-list">
+                      <h4>Historical Context Used for Analysis:</h4>
+                      {similarArticlesData[similarArticlesInfo.sentimentId].map((article, articleIndex) => (
+                        <div key={articleIndex} className="similar-article-item">
+                          <div className="similar-article-header">
+                            <span className="similar-article-date">
+                              {new Date(article.date_publish).toLocaleDateString()}
+                            </span>
+                            {article.similarity_score && (
+                              <span className="similarity-score">
+                                Similarity: {(article.similarity_score * 100).toFixed(1)}%
+                              </span>
+                            )}
+                          </div>
+                          <h5 className="similar-article-title">{article.title}</h5>
+                          <p className="similar-article-description">
+                            {article.description.length > 150 
+                              ? `${article.description.substring(0, 150)}...`
+                              : article.description
+                            }
+                          </p>
+                          {article.ticker_metadata && Object.keys(article.ticker_metadata).length > 0 && (
+                            <div className="historical-price-changes">
+                              <strong>Historical Price Impact:</strong>
+                              <div className="price-changes">
+                                {Object.entries(article.ticker_metadata).map(([ticker, change]) => (
+                                  <span key={ticker} className={`price-change ${change > 0 ? 'positive' : change < 0 ? 'negative' : 'neutral'}`}>
+                                    {ticker}: {change > 0 ? '+' : ''}{change.toFixed(2)}%
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="no-similar-articles">No similar historical articles found.</div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
       
       <h3 className="news-title">{item.title}</h3>

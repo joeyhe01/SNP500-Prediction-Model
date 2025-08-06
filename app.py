@@ -11,7 +11,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 from flask import Flask, jsonify, request, send_from_directory, send_file
 from models.database import get_db_session
-from models.database import Simulation, DailyRecap, NewsSentiment, News, RealtimePrediction
+from models.database import Simulation, DailyRecap, NewsSentiment, News, RealtimePrediction, StockPrice
 from sqlalchemy import desc, asc, func, cast, Date, and_
 from datetime import datetime, timedelta
 import json
@@ -582,6 +582,140 @@ def get_ticker_sentiment_summary(simulation_id):
             'total_tickers': len(result),
             'total_sentiment_records': sum(ticker['total'] for ticker in result)
         })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+@app.route('/api/simulation/<int:simulation_id>/snp500-performance')
+def get_snp500_performance(simulation_id):
+    """Get S&P 500 performance data for the simulation's date range"""
+    session = get_db_session()
+    
+    try:
+        # Get simulation info
+        simulation = session.query(Simulation).filter_by(id=simulation_id).first()
+        if not simulation:
+            return jsonify({'error': 'Simulation not found'}), 404
+        
+        # Get daily recap data to determine the date range
+        daily_data = session.query(DailyRecap).filter_by(simulation_id=simulation_id).order_by(asc(DailyRecap.date)).all()
+        
+        if not daily_data:
+            return jsonify({'error': 'No daily data found for simulation'}), 404
+        
+        start_date = daily_data[0].date
+        end_date = daily_data[-1].date
+        
+        # Try to get S&P 500 data (using SPY as proxy)
+        # SPY is the most common S&P 500 ETF used as a proxy
+        spy_data = session.query(StockPrice).filter(
+            and_(
+                StockPrice.ticker == 'SPY',
+                StockPrice.date >= start_date,
+                StockPrice.date <= end_date
+            )
+        ).order_by(asc(StockPrice.date)).all()
+        
+        # If no SPY data, try ^GSPC (S&P 500 index)
+        if not spy_data:
+            spy_data = session.query(StockPrice).filter(
+                and_(
+                    StockPrice.ticker == '^GSPC',
+                    StockPrice.date >= start_date,
+                    StockPrice.date <= end_date
+                )
+            ).order_by(asc(StockPrice.date)).all()
+        
+        # If still no data, try SPXL or other S&P 500 related tickers
+        if not spy_data:
+            for ticker in ['SPXL', 'UPRO', 'VOO', 'IVV']:
+                spy_data = session.query(StockPrice).filter(
+                    and_(
+                        StockPrice.ticker == ticker,
+                        StockPrice.date >= start_date,
+                        StockPrice.date <= end_date
+                    )
+                ).order_by(asc(StockPrice.date)).all()
+                if spy_data:
+                    break
+        
+        if not spy_data:
+            return jsonify({
+                'error': 'No S&P 500 data available for the simulation period',
+                'date_range': {
+                    'start': start_date.strftime('%Y-%m-%d'),
+                    'end': end_date.strftime('%Y-%m-%d')
+                }
+            }), 404
+        
+        # Calculate S&P 500 performance metrics
+        initial_price = spy_data[0].close_price
+        final_price = spy_data[-1].close_price
+        total_return = ((final_price - initial_price) / initial_price) * 100
+        
+        # Calculate daily performance data
+        daily_performance = []
+        for i, price_data in enumerate(spy_data):
+            if i == 0:
+                daily_return = 0
+                cumulative_return = 0
+            else:
+                prev_price = spy_data[i-1].close_price
+                daily_return = ((price_data.close_price - prev_price) / prev_price) * 100
+                cumulative_return = ((price_data.close_price - initial_price) / initial_price) * 100
+            
+            daily_performance.append({
+                'date': price_data.date.strftime('%Y-%m-%d'),
+                'close_price': price_data.close_price,
+                'daily_return': round(daily_return, 2),
+                'cumulative_return': round(cumulative_return, 2)
+            })
+        
+        # Calculate additional metrics
+        daily_returns = [day['daily_return'] for day in daily_performance[1:]]  # Skip first day (0 return)
+        
+        # Calculate volatility (standard deviation of daily returns)
+        if len(daily_returns) > 1:
+            import statistics
+            volatility = statistics.stdev(daily_returns)
+            avg_daily_return = statistics.mean(daily_returns)
+        else:
+            volatility = 0
+            avg_daily_return = 0
+        
+        # Calculate max drawdown
+        max_drawdown = 0
+        peak_value = initial_price
+        for price_data in spy_data:
+            if price_data.close_price > peak_value:
+                peak_value = price_data.close_price
+            else:
+                drawdown = ((peak_value - price_data.close_price) / peak_value) * 100
+                if drawdown > max_drawdown:
+                    max_drawdown = drawdown
+        
+        result = {
+            'simulation_id': simulation_id,
+            'ticker_used': spy_data[0].ticker,
+            'date_range': {
+                'start': start_date.strftime('%Y-%m-%d'),
+                'end': end_date.strftime('%Y-%m-%d')
+            },
+            'summary_metrics': {
+                'total_return': round(total_return, 2),
+                'initial_price': round(initial_price, 2),
+                'final_price': round(final_price, 2),
+                'volatility': round(volatility, 2),
+                'max_drawdown': round(max_drawdown, 2),
+                'avg_daily_return': round(avg_daily_return, 2),
+                'trading_days': len(spy_data)
+            },
+            'daily_performance': daily_performance
+        }
+        
+        return jsonify(result)
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500

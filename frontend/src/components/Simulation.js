@@ -9,6 +9,7 @@ const Simulation = () => {
   const { simulationId } = useParams();
   const navigate = useNavigate();
   const [simulation, setSimulation] = useState(null);
+  const [snp500Data, setSnp500Data] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -21,8 +22,17 @@ const Simulation = () => {
     setError(null);
     
     try {
-      const response = await axios.get(`/api/simulation/${simulationId}`);
-      setSimulation(response.data);
+      // Load simulation data and S&P 500 data in parallel
+      const [simulationResponse, snp500Response] = await Promise.all([
+        axios.get(`/api/simulation/${simulationId}`),
+        axios.get(`/api/simulation/${simulationId}/snp500-performance`).catch(err => {
+          console.warn('S&P 500 data not available:', err.response?.data?.error || err.message);
+          return null;
+        })
+      ]);
+      
+      setSimulation(simulationResponse.data);
+      setSnp500Data(snp500Response?.data || null);
     } catch (err) {
       setError(`Error loading data: ${err.message}`);
     } finally {
@@ -33,12 +43,33 @@ const Simulation = () => {
   const prepareChartData = () => {
     if (!simulation?.daily_data) return [];
     
-    return simulation.daily_data.map(day => ({
-      date: day.date,
-      portfolioValue: day.ending_money,
-      dailyPnL: day.daily_pnl,
-      dailyReturn: day.daily_return
-    }));
+    // Create a map of S&P 500 data by date for easy lookup
+    const snp500Map = {};
+    if (snp500Data?.daily_performance) {
+      snp500Data.daily_performance.forEach(day => {
+        snp500Map[day.date] = day;
+      });
+    }
+    
+    const initialPortfolioValue = simulation.daily_data[0]?.starting_money || 100000;
+    
+    return simulation.daily_data.map(day => {
+      const snp500Day = snp500Map[day.date];
+      
+      // Calculate normalized S&P 500 value to match initial portfolio value
+      let snp500Value = null;
+      if (snp500Day && snp500Data?.summary_metrics) {
+        const snp500Return = snp500Day.cumulative_return / 100; // Convert percentage to decimal
+        snp500Value = initialPortfolioValue * (1 + snp500Return);
+      }
+      
+      return {
+        date: day.date,
+        portfolioValue: day.ending_money,
+        snp500Value: snp500Value,
+        dailyReturn: day.daily_return
+      };
+    });
   };
 
   const handleChartClick = (data) => {
@@ -60,8 +91,8 @@ const Simulation = () => {
     if (name === 'portfolioValue') {
       return [formatCurrency(value), 'Portfolio Value'];
     }
-    if (name === 'dailyPnL') {
-      return [formatCurrency(value), 'Daily P&L'];
+    if (name === 'snp500Value') {
+      return [formatCurrency(value), 'S&P 500'];
     }
     return [value, name];
   };
@@ -130,6 +161,10 @@ const Simulation = () => {
   const totalReturn = ((lastDay.ending_money - firstDay.starting_money) / firstDay.starting_money * 100);
   const totalTrades = daily_data.reduce((sum, day) => sum + day.total_trades, 0);
   const extraData = simInfo.extra_data || {};
+  
+  // Calculate S&P 500 vs simulation performance comparison
+  const snp500TotalReturn = snp500Data?.summary_metrics?.total_return || 0;
+  const outperformance = totalReturn - snp500TotalReturn;
 
   return (
     <div>
@@ -179,10 +214,24 @@ const Simulation = () => {
             value={`${(extraData.win_rate_pct || 0).toFixed(2)}%`}
             className={(extraData.win_rate_pct || 0) > 50 ? 'positive' : (extraData.win_rate_pct || 0) < 50 ? 'negative' : 'neutral'}
           />
+          {snp500Data && (
+            <SummaryCard 
+              label="S&P 500 Return" 
+              value={`${snp500TotalReturn > 0 ? '+' : ''}${snp500TotalReturn.toFixed(2)}%`}
+              className={snp500TotalReturn > 0 ? 'positive' : snp500TotalReturn < 0 ? 'negative' : 'neutral'}
+            />
+          )}
+          {snp500Data && (
+            <SummaryCard 
+              label="vs S&P 500" 
+              value={`${outperformance > 0 ? '+' : ''}${outperformance.toFixed(2)}%`}
+              className={outperformance > 0 ? 'positive' : outperformance < 0 ? 'negative' : 'neutral'}
+            />
+          )}
         </div>
         
         <div className="chart-container">
-          <h2 className="chart-title">Daily P&L and Portfolio Value</h2>
+          <h2 className="chart-title">Portfolio Value vs S&P 500</h2>
           <ResponsiveContainer width="100%" height={400}>
             <LineChart data={chartData} onClick={handleChartClick}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
@@ -196,12 +245,14 @@ const Simulation = () => {
                 orientation="left"
                 stroke="#667eea"
                 tickFormatter={formatCurrency}
+                domain={[90000, 110000]}
               />
               <YAxis 
-                yAxisId="pnl"
+                yAxisId="snp500"
                 orientation="right"
-                stroke="#22c55e"
+                stroke="#f59e0b"
                 tickFormatter={formatCurrency}
+                domain={[90000, 110000]}
               />
               <Tooltip 
                 formatter={formatTooltip}
@@ -222,16 +273,20 @@ const Simulation = () => {
                 strokeWidth={2}
                 dot={false}
                 name="Portfolio Value"
+                connectNulls={true}
               />
-              <Line
-                yAxisId="pnl"
-                type="monotone"
-                dataKey="dailyPnL"
-                stroke="#22c55e"
-                strokeWidth={2}
-                dot={false}
-                name="Daily P&L"
-              />
+              {snp500Data && (
+                <Line
+                  yAxisId="snp500"
+                  type="monotone"
+                  dataKey="snp500Value"
+                  stroke="#f59e0b"
+                  strokeWidth={2}
+                  dot={false}
+                  name="S&P 500"
+                  connectNulls={true}
+                />
+              )}
             </LineChart>
           </ResponsiveContainer>
         </div>
