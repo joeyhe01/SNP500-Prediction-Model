@@ -36,10 +36,10 @@ spec:
               value: "postgres"
           resources:
             requests:
-              memory: "1Gi"
+              memory: "16Gi"
               cpu: "500m"
             limits:
-              memory: "2Gi"
+              memory: "32Gi"
               cpu: "2"
 ---
 apiVersion: v1
