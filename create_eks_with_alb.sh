@@ -4,7 +4,7 @@ set -e
 # ---------------------------
 # CONFIGURATION
 # ---------------------------
-CLUSTER_NAME="snp500-prediction-cluster"
+CLUSTER_NAME="snp500-prediction-cluster-v2"
 REGION="us-east-1"
 NODE_TYPE="m5.2xlarge"  # 8 vCPU, 32 GB memory per node
 NODE_COUNT=1            # 2 nodes = 64 GB total
