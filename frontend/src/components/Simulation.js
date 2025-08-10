@@ -174,11 +174,6 @@ const Simulation = () => {
             value={`${(extraData.max_drawdown_pct || 0).toFixed(2)}%`}
             className="negative"
           />
-          <SummaryCard 
-            label="Win Rate" 
-            value={`${(extraData.win_rate_pct || 0).toFixed(2)}%`}
-            className={(extraData.win_rate_pct || 0) > 50 ? 'positive' : (extraData.win_rate_pct || 0) < 50 ? 'negative' : 'neutral'}
-          />
         </div>
         
         <div className="chart-container">
