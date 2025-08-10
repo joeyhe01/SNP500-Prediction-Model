@@ -1341,9 +1341,11 @@ def get_realtime_prediction_details(prediction_id):
 @app.route('/api/realtime/prediction-status')
 def get_realtime_prediction_status():
     """Get status information about realtime predictions"""
+    logger.warn("vravish: Entered get_realtime_prediction_status function")
     session = get_db_session()
     
     try:
+        logger.warn("vravish: Querying for latest prediction and counts")
         # Get latest prediction timestamp
         latest_prediction = session.query(RealtimePrediction)\
             .order_by(desc(RealtimePrediction.timestamp))\

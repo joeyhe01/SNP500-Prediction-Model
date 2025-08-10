@@ -3,13 +3,16 @@ kind: Ingress
 metadata:
   name: snp500-ingress
   annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /$1
+    # nginx.ingress.kubernetes.io/rewrite-target: /$1
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/healthcheck-path.snp500-backend: /api/health
-    alb.ingress.kubernetes.io/healthcheck-port.snp500-backend: '5001'
-    alb.ingress.kubernetes.io/healthcheck-path.snp500-frontend: /
-    alb.ingress.kubernetes.io/healthcheck-port.snp500-frontend: '3000'
+    # alb.ingress.kubernetes.io/healthcheck-path.snp500-backend: /api/health
+    # alb.ingress.kubernetes.io/healthcheck-port.snp500-backend: '5001'
+    # alb.ingress.kubernetes.io/healthcheck-path.snp500-frontend: /
+    # alb.ingress.kubernetes.io/healthcheck-port.snp500-frontend: '3000'
+    alb.ingress.kubernetes.io/healthcheck-path: /
+    alb.ingress.kubernetes.io/healthcheck-port: traffic-port
+    alb.ingress.kubernetes.io/success-codes: "200,404"
 spec:
   ingressClassName: alb
   rules:
