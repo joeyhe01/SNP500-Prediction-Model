@@ -39,6 +39,11 @@ spec:
                 secretKeyRef:
                   name: snp500-api-keys-secret
                   key: OPENAI_API_KEY
+            - name: NEWSAPI_AI_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: snp500-api-keys-secret
+                  key: NEWSAPI_AI_API_KEY
           resources:
             requests:
               memory: "1Gi"
