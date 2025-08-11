@@ -15,4 +15,4 @@ COPY requirements.txt ./
 COPY models ./models
 COPY realtime ./realtime
 EXPOSE 5001
-CMD ["gunicorn", "-b", "0.0.0.0:5001", "app:app"]
+CMD ["gunicorn", "-b", "0.0.0.0:5001", "--timeout", "1800", "app:app"]
